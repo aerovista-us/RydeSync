@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { issueBrowserSession, browserSessionCookie, browserSessionFromRequest, authStateCookie } from '../lib/browser-session.js';
-import { beginBrowserLogin, completeBrowserLogin } from '../lib/browser-auth.js';
+import { beginBrowserLogin, browserLogout, completeBrowserLogin } from '../lib/browser-auth.js';
 import { serviceHmac } from '../lib/aerocore-app-adapter.js';
 
 function config(overrides = {}) {
@@ -96,6 +96,52 @@ test('one-time handoff uses the adapter HMAC contract, resolves identity, and cr
   } finally {
     await new Promise((resolve) => gateway.close(resolve));
   }
+});
+
+test('logout revokes the upstream AVCC app session and clears local cookies', async () => {
+  const secret = 'adapter-test-secret'.repeat(3);
+  const calls = [];
+  const gateway = http.createServer(async (req, res) => {
+    const raw = await readBody(req);
+    assertAdapterHmac(req, raw, secret);
+    calls.push({ path: req.url, body: JSON.parse(raw) });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, revoked: true }));
+  });
+  await new Promise((resolve) => gateway.listen(0, '127.0.0.1', resolve));
+  const cfg = config({ identityGatewayOrigin: `http://127.0.0.1:${gateway.address().port}`, serviceSecret: secret });
+  const local = issueBrowserSession({
+    principal: { identityId: 'identity_logout', displayName: 'Member', email: null, capabilities: [] },
+    upstreamToken: 'avcc-session-token-logout-123456'
+  }, cfg);
+  const req = { headers: { cookie: browserSessionCookie(local, cfg).split(';')[0] } };
+  const captured = {};
+  const res = { writeHead(status, headers) { captured.status = status; captured.headers = headers; }, end() {} };
+  try {
+    await browserLogout(req, res, cfg);
+    assert.deepEqual(calls, [{ path: '/v1/session/revoke', body: { sessionToken: 'avcc-session-token-logout-123456' } }]);
+    assert.equal(captured.status, 302);
+    assert.equal(captured.headers.location, '/');
+    assert.ok(Array.isArray(captured.headers['set-cookie']));
+    assert.match(captured.headers['set-cookie'][0], /^__session=;/);
+  } finally {
+    await new Promise((resolve) => gateway.close(resolve));
+  }
+});
+
+test('logout still clears local cookies when Identity Gateway is unavailable', async () => {
+  const cfg = config({ identityGatewayOrigin: 'http://127.0.0.1:1' });
+  const local = issueBrowserSession({
+    principal: { identityId: 'identity_logout', displayName: 'Member', email: null, capabilities: [] },
+    upstreamToken: 'avcc-session-token-logout-123456'
+  }, cfg);
+  const req = { headers: { cookie: browserSessionCookie(local, cfg).split(';')[0] } };
+  const captured = {};
+  const res = { writeHead(status, headers) { captured.status = status; captured.headers = headers; }, end() {} };
+  await browserLogout(req, res, cfg);
+  assert.equal(captured.status, 302);
+  assert.equal(captured.headers.location, '/');
+  assert.match(captured.headers['set-cookie'][0], /^__session=;/);
 });
 
 test('handoff network failure is a clean fail-closed 503 instead of an internal error', async () => {
