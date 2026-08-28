@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#071014" />
+  <title>RydeSync</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">AEROVISTA // ECHOVERSE</div>
+        <h1>RYDE<span>SYNC</span></h1>
+        <p class="tagline">Ride together. Stay connected.</p>
+      </div>
+      <div id="identityPill" class="pill">Checking identity…</div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">GLOBAL FOUNDATION // ALPHA</div>
+        <h2>One crew. One room. No network gymnastics.</h2>
+        <p>Public ride rooms stay frictionless. AeroVista Identity adds persistent access without becoming a single point of failure for guest rides.</p>
+      </div>
+      <div class="signal" aria-hidden="true">
+        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core">R</div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-kicker">HOST</div>
+        <h3>Start a Ride</h3>
+        <form id="createForm">
+          <label>Ride name<input name="name" placeholder="Lake Loop" required minlength="2" maxlength="80" /></label>
+          <label>Mode<select name="mode"><option value="group_ride">Group Ride</option><option value="listening_party">Listening Party</option><option value="classroom">Classroom</option><option value="band_practice">Band Practice</option><option value="campaign">Campaign</option></select></label>
+          <button type="submit">Start Ride</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="card-kicker">CREW</div>
+        <h3>Join a Ride</h3>
+        <form id="joinForm">
+          <label>Room ID or code<input name="room" placeholder="ABCD2345" required /></label>
+          <label>Your name<input name="displayName" placeholder="Guest Rider" maxlength="60" /></label>
+          <button type="submit" class="secondary">Join Ride</button>
+        </form>
+      </article>
+    </section>
+
+    <section id="result" class="result hidden"></section>
+
+    <section id="realtimePanel" class="realtime-panel hidden">
+      <div class="rt-head">
+        <div>
+          <div class="card-kicker">REALTIME ROOM</div>
+          <h3 id="rtRoom">Ride room</h3>
+        </div>
+        <div class="rt-meta">
+          <span id="rtStatus" class="rt-status">CONNECTING</span>
+          <span>SEQ <strong id="rtSeq">—</strong></span>
+          <button id="rtRefresh" type="button" class="mini">Refresh</button>
+        </div>
+      </div>
+      <ul id="rtMembers" class="member-list"><li class="muted">Waiting for presence snapshot…</li></ul>
+
+      <div class="location-panel">
+        <div class="location-head">
+          <div>
+            <div class="card-kicker">LIVE LOCATION</div>
+            <p id="locationStatus" class="location-status">Off · never starts automatically</p>
+          </div>
+          <button id="locationToggle" type="button" class="mini location-toggle">Share my location</button>
+        </div>
+        <p class="privacy-note">Visible only to authenticated members of this ride. Coordinates are ephemeral and are cleared when you stop, disconnect, go stale, or the room expires.</p>
+        <ul id="rtLocations" class="location-list"><li class="muted">No one is sharing location.</li></ul>
+      </div>
+    </section>
+
+    <footer>
+      <span>Guest rooms: <strong>ON</strong></span>
+      <span>AV Identity: <strong id="identityMode">—</strong></span>
+      <span>EchoVerse upstream: <strong>PRIVATE</strong></span>
+      <span>Realtime: <strong id="realtimeMode">—</strong></span>
+      <span>Live location: <strong id="locationMode">—</strong></span>
+    </footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

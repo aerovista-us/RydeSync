@@ -1,0 +1,15 @@
+{
+  "name": "rydesync",
+  "version": "3.0.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "description": "RydeSync global-first foundation: public ride rooms, AeroVista Identity adapter, and EchoVerse entitlement boundary.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node apps/api/server.js",
+    "dev": "NODE_ENV=development node --watch apps/api/server.js",
+    "test": "node --test apps/api/test/*.test.js"
+  }
+}

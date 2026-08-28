@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { RoomStore } from '../lib/rooms.js';
+import { verifyRoomToken } from '../lib/room-token.js';
+
+const config = {
+  roomTtlSeconds: 3600,
+  memberTokenTtlSeconds: 3600,
+  roomTokenSecret: 'r'.repeat(48)
+};
+const guest = { kind: 'guest', authenticated: false, identityId: null, displayName: null };
+
+test('guest can create and join a public ride room', () => {
+  const now = Date.UTC(2026, 7, 27, 12, 0, 0);
+  const store = new RoomStore(config, () => now);
+  const created = store.create({ name: 'Lake Loop', mode: 'group_ride' }, guest);
+  assert.equal(created.member.role, 'host');
+  const joined = store.join(created.room.joinCode, { displayName: 'Guest Two' }, guest);
+  assert.equal(joined.member.role, 'rider');
+  assert.equal(joined.room.memberCount, 2);
+  assert.equal(verifyRoomToken(joined.token, config.roomTokenSecret, now).room_id, created.room.id);
+});
+
+test('expired room is pruned and cannot be joined', () => {
+  let now = Date.UTC(2026, 7, 27, 12, 0, 0);
+  const store = new RoomStore({ ...config, roomTtlSeconds: 300 }, () => now);
+  const created = store.create({ name: 'Short Ride' }, guest);
+  now += 301_000;
+  assert.throws(() => store.join(created.room.id, {}, guest), /expired|not found/i);
+});
