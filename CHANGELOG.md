@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0.0-alpha.5 — Shared Soundtrack Control Plane
+
+- Added server-authoritative per-room playback state.
+- Added host/co-host `select`, `play`, `pause`, `seek`, and `clear` realtime commands.
+- Added playback epochs and `expectedEpoch` conflict protection.
+- Added playback state to authoritative room snapshots and reconnect restore.
+- Added periodic `playback.sync` drift hints that do not mutate playback epoch.
+- Added client room-clock estimation through `presence.ping/pong`.
+- Added portable drift correction thresholds and policy tests.
+- EchoVerse entitlement remains per rider; shared control never grants media access.
+- Browser playback remains intentionally deferred until AV Identity has a stable browser-native session transport.
+- Test suite: 43 passing.
+
 ## 3.0.0-alpha.4 — Crew Map + Canonical EchoVerse Proxy
 
 - Added a real interactive crew map over the existing room-scoped live-location feed.

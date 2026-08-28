@@ -1,10 +1,12 @@
 import { CrewMap } from '/map.js';
+import { playbackTargetMs as projectPlaybackTarget } from '/sync-core.js';
 const $ = (selector) => document.querySelector(selector);
 const result = $('#result');
 const realtimePanel = $('#realtimePanel');
 let bootstrap = null;
 let realtime = null;
 let crewMap = null;
+const echoverseTrackIndex = new Map();
 const locationShare = {
   watchId: null,
   enabled: false,
@@ -226,11 +228,79 @@ function startLocationSharing() {
   });
 }
 
+function isPlaybackController() {
+  return ['host', 'co_host'].includes(realtime?.session?.member?.role);
+}
+
+function formatTime(ms) {
+  const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function playbackTargetMs(playback = realtime?.playback) {
+  return projectPlaybackTarget(playback, Date.now() + Number(realtime?.clockOffsetMs || 0));
+}
+
+function playbackTrackLabel(trackId) {
+  const track = echoverseTrackIndex.get(String(trackId));
+  if (!track) return { title: trackId ? 'Protected EchoVerse track' : 'No shared track', detail: trackId || 'Room soundtrack is idle' };
+  return {
+    title: track.title || 'Untitled track',
+    detail: [track.artist, track.album].filter(Boolean).join(' · ') || String(trackId)
+  };
+}
+
+function renderPlayback(message = null) {
+  const playback = message?.playback || realtime?.playback || null;
+  const title = $('#sharedTrackTitle');
+  if (!title) return;
+  const meta = $('#sharedTrackMeta');
+  const state = $('#sharedPlaybackState');
+  const clock = $('#sharedPlaybackClock');
+  const controls = $('#sharedPlaybackControls');
+  const selected = playbackTrackLabel(playback?.trackId || null);
+  title.textContent = selected.title;
+  meta.textContent = selected.detail;
+  const target = playbackTargetMs(playback);
+  state.textContent = playback?.trackId ? `${String(playback.status || 'idle').toUpperCase()} · E${playback.epoch ?? 0}` : 'IDLE';
+  state.className = `playback-state ${playback?.status === 'playing' ? 'online' : ''}`;
+  clock.textContent = playback?.trackId ? `Target ${formatTime(target)} · room clock ${Math.round(realtime?.clockOffsetMs || 0)}ms` : 'Waiting for a host to select a track.';
+  controls.hidden = !isPlaybackController();
+  if (!controls.hidden) {
+    $('#playbackPlay').disabled = !playback?.trackId || playback?.status === 'playing';
+    $('#playbackPause').disabled = !playback?.trackId || playback?.status !== 'playing';
+    $('#playbackBack').disabled = !playback?.trackId;
+    $('#playbackForward').disabled = !playback?.trackId;
+    $('#playbackClear').disabled = !playback?.trackId;
+  }
+}
+
+function sendPlayback(type, payload = {}) {
+  if (!realtime?.authenticated || realtime.ws?.readyState !== WebSocket.OPEN) return;
+  const expectedEpoch = Number.isInteger(realtime.playback?.epoch) ? realtime.playback.epoch : 0;
+  realtime.ws.send(JSON.stringify({ type, expectedEpoch, ...payload }));
+}
+
+function sendClockPing() {
+  if (!realtime?.authenticated || realtime.ws?.readyState !== WebSocket.OPEN) return;
+  realtime.ws.send(JSON.stringify({ type: 'presence.ping', clientTs: Date.now() }));
+}
+
+function startClockSync() {
+  if (!realtime) return;
+  clearInterval(realtime.pingTimer);
+  sendClockPing();
+  realtime.pingTimer = setInterval(sendClockPing, 5000);
+}
+
 function stopRealtime() {
   if (!realtime) return;
   stopLocationSharing({ notifyServer: true });
   realtime.manualClose = true;
   clearTimeout(realtime.reconnectTimer);
+  clearInterval(realtime.pingTimer);
   if (realtime.ws && realtime.ws.readyState < WebSocket.CLOSING) realtime.ws.close(1000, 'Leaving ride');
   realtime = null;
 }
@@ -243,6 +313,10 @@ function connectRealtime(session) {
     lastSeq: 0,
     members: [],
     locations: new Map(),
+    playback: null,
+    clockOffsetMs: 0,
+    clockSamples: 0,
+    pingTimer: null,
     reconnectAttempt: 0,
     reconnectTimer: null,
     manualClose: false,
@@ -271,18 +345,46 @@ function connectRealtime(session) {
         realtime.authenticated = true;
         realtime.reconnectAttempt = 0;
         renderRealtime({ label: message.resumed ? 'RESUMED' : 'LIVE', tone: 'online', seq: message.seq });
+        startClockSync();
         if (locationShare.enabled && locationShare.latest) sendLatestLocation({ force: true });
       } else if (message.type === 'room.snapshot') {
         realtime.members = Array.isArray(message.members) ? message.members : [];
         realtime.locations = new Map((Array.isArray(message.locations) ? message.locations : []).map((entry) => [entry.memberId, entry]));
+        realtime.playback = message.playback || realtime.playback;
         renderRealtime({ label: 'LIVE', tone: 'online', seq: message.seq, room: message.room, members: realtime.members });
         renderCrewMap({ autoFit: true });
+        renderPlayback();
       } else if (message.type === 'member.online' || message.type === 'member.offline') {
         const member = message.member;
         const index = realtime.members.findIndex((candidate) => candidate.id === member.id);
         if (index >= 0) realtime.members[index] = member;
         else realtime.members.push(member);
         renderRealtime({ label: 'LIVE', tone: 'online', seq: message.seq, members: realtime.members });
+      } else if (message.type === 'presence.pong') {
+        const sent = Number(message.clientTs);
+        const serverTs = Date.parse(message.serverTs);
+        const received = Date.now();
+        if (Number.isFinite(sent) && Number.isFinite(serverTs) && sent <= received) {
+          const sample = serverTs - ((sent + received) / 2);
+          if (Math.abs(sample) < 60000) {
+            realtime.clockOffsetMs = realtime.clockSamples ? (realtime.clockOffsetMs * 0.75 + sample * 0.25) : sample;
+            realtime.clockSamples += 1;
+            renderPlayback();
+          }
+        }
+      } else if (message.type === 'playback.state' || message.type === 'playback.sync') {
+        realtime.playback = message.playback || realtime.playback;
+        renderPlayback(message);
+      } else if (message.type === 'playback.error') {
+        const state = $('#sharedPlaybackState');
+        if (state) {
+          state.textContent = `CONTROL ERROR · ${message.error?.message || 'command rejected'}`;
+          state.className = 'playback-state error';
+        }
+        if (message.playback) {
+          realtime.playback = message.playback;
+          setTimeout(() => renderPlayback(), 1500);
+        }
       } else if (message.type === 'location.member') {
         realtime.locations.set(message.location.memberId, message.location);
         renderLocations();
@@ -299,6 +401,7 @@ function connectRealtime(session) {
     ws.addEventListener('close', (event) => {
       if (!realtime || realtime.ws !== ws || realtime.manualClose) return;
       realtime.authenticated = false;
+      clearInterval(realtime.pingTimer);
       if ([4003, 4004, 4005, 4010].includes(event.code)) {
         stopLocationSharing({ notifyServer: false, label: 'Off · ride session ended' });
         renderRealtime({ label: 'SESSION ENDED', tone: 'error' });
@@ -331,6 +434,8 @@ function normalizeTrackList(body) {
 function renderEchoVerseTracks(body) {
   const host = $('#echoverseTracks');
   const tracks = normalizeTrackList(body).slice(0, 12);
+  echoverseTrackIndex.clear();
+  for (const track of normalizeTrackList(body)) echoverseTrackIndex.set(String(track.id), track);
   host.innerHTML = tracks.length ? tracks.map((track) => `
     <article class="track-card">
       <div class="track-art">${track.artworkUrl ? `<img src="${escapeHtml(track.artworkUrl)}" alt="" />` : '<span>EV</span>'}</div>
@@ -338,8 +443,10 @@ function renderEchoVerseTracks(body) {
         <strong>${escapeHtml(track.title || 'Untitled track')}</strong>
         <small>${escapeHtml([track.artist, track.album].filter(Boolean).join(' · ') || 'EchoVerse')}</small>
       </div>
-      <span class="track-stream-state">Protected stream route ready</span>
+      <span class="track-stream-state">Protected stream · per-rider entitlement</span>
+      <button type="button" class="mini track-sync" data-track-id="${escapeHtml(track.id)}" ${isPlaybackController() ? '' : 'disabled'}>Sync to room</button>
     </article>`).join('') : '<div class="muted">No tracks returned by the current catalog contract.</div>';
+  renderPlayback();
 }
 
 async function loadEchoVerseCatalog() {
@@ -362,6 +469,22 @@ async function loadEchoVerseCatalog() {
     button.disabled = false;
   }
 }
+
+$('#sharedPlaybackControls').addEventListener('click', (event) => {
+  const id = event.target?.id;
+  const current = playbackTargetMs();
+  if (id === 'playbackPlay') sendPlayback('playback.play');
+  if (id === 'playbackPause') sendPlayback('playback.pause');
+  if (id === 'playbackBack') sendPlayback('playback.seek', { positionMs: Math.max(0, current - 10_000) });
+  if (id === 'playbackForward') sendPlayback('playback.seek', { positionMs: current + 10_000 });
+  if (id === 'playbackClear') sendPlayback('playback.clear');
+});
+
+$('#echoverseTracks').addEventListener('click', (event) => {
+  const button = event.target.closest?.('.track-sync');
+  if (!button || button.disabled) return;
+  sendPlayback('playback.select', { trackId: button.dataset.trackId, autoplay: true, positionMs: 0 });
+});
 
 $('#createForm').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -431,6 +554,8 @@ if (incomingRoom) {
     localStorage.removeItem('rydesync:last-session');
   }
 }
+
+setInterval(() => { if (realtime?.playback?.trackId) renderPlayback(); }, 500);
 
 refreshIdentity().catch((error) => {
   $('#identityPill').textContent = 'Identity status unavailable';

@@ -351,3 +351,121 @@ test('disconnect clears a rider location instead of leaving stale coordinates be
     await closeServer(server);
   }
 });
+
+test('host playback command becomes authoritative room state for every member', async () => {
+  const { server, httpBase, wsBase } = await openServer();
+  let hostWs;
+  let riderWs;
+  try {
+    const created = await createRoom(httpBase, 'Shared Soundtrack');
+    const joinedRes = await fetch(`${httpBase}/v1/rooms/${created.room.joinCode}/join`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Rider 2' })
+    });
+    const joined = await joinedRes.json();
+
+    hostWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    riderWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await Promise.all([onceOpen(hostWs), onceOpen(riderWs)]);
+    const hostAuth = nextJson(hostWs, (m) => m.type === 'auth.ok');
+    const riderAuth = nextJson(riderWs, (m) => m.type === 'auth.ok');
+    hostWs.send(JSON.stringify({ type: 'auth', token: created.token }));
+    riderWs.send(JSON.stringify({ type: 'auth', token: joined.token }));
+    await Promise.all([hostAuth, riderAuth]);
+
+    const shared = nextJson(riderWs, (m) => m.type === 'playback.state' && m.playback?.trackId === 'trk-crew');
+    hostWs.send(JSON.stringify({ type: 'playback.select', trackId: 'trk-crew', autoplay: true, expectedEpoch: 0 }));
+    const event = await shared;
+    assert.equal(event.playback.status, 'playing');
+    assert.equal(event.playback.epoch, 1);
+    assert.equal(event.playback.updatedBy, created.member.id);
+  } finally {
+    if (riderWs) await closeWs(riderWs);
+    if (hostWs) await closeWs(hostWs);
+    await closeServer(server);
+  }
+});
+
+test('rider cannot mutate room playback even though room realtime access is valid', async () => {
+  const { server, httpBase, wsBase } = await openServer();
+  let riderWs;
+  try {
+    const created = await createRoom(httpBase, 'Playback Roles');
+    const joinedRes = await fetch(`${httpBase}/v1/rooms/${created.room.joinCode}/join`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Rider 2' })
+    });
+    const joined = await joinedRes.json();
+    riderWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await onceOpen(riderWs);
+    const auth = nextJson(riderWs, (m) => m.type === 'auth.ok');
+    riderWs.send(JSON.stringify({ type: 'auth', token: joined.token }));
+    await auth;
+    const denied = nextJson(riderWs, (m) => m.type === 'playback.error');
+    riderWs.send(JSON.stringify({ type: 'playback.select', trackId: 'trk-nope', autoplay: true, expectedEpoch: 0 }));
+    const event = await denied;
+    assert.equal(event.error.code, 'playback_forbidden');
+    assert.equal(riderWs.readyState, WebSocket.OPEN);
+  } finally {
+    if (riderWs) await closeWs(riderWs);
+    await closeServer(server);
+  }
+});
+
+test('reconnect snapshot restores current playback epoch and anchor', async () => {
+  const { server, httpBase, wsBase } = await openServer();
+  let hostWs;
+  let second;
+  try {
+    const created = await createRoom(httpBase, 'Playback Reconnect');
+    hostWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await onceOpen(hostWs);
+    const auth = nextJson(hostWs, (m) => m.type === 'auth.ok');
+    hostWs.send(JSON.stringify({ type: 'auth', token: created.token }));
+    await auth;
+    const state = nextJson(hostWs, (m) => m.type === 'playback.state' && m.playback?.trackId === 'trk-resume');
+    hostWs.send(JSON.stringify({ type: 'playback.select', trackId: 'trk-resume', autoplay: true, expectedEpoch: 0 }));
+    const selected = await state;
+    await closeWs(hostWs);
+    hostWs = null;
+
+    second = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await onceOpen(second);
+    const snapshot = nextJson(second, (m) => m.type === 'room.snapshot');
+    second.send(JSON.stringify({ type: 'auth', token: created.token, lastSeenSeq: selected.seq }));
+    const restored = await snapshot;
+    assert.equal(restored.playback.trackId, 'trk-resume');
+    assert.equal(restored.playback.status, 'playing');
+    assert.equal(restored.playback.epoch, 1);
+  } finally {
+    if (second) await closeWs(second);
+    if (hostWs) await closeWs(hostWs);
+    await closeServer(server);
+  }
+});
+
+test('playing rooms emit periodic playback.sync drift hints without changing epoch', async () => {
+  const cfg = config();
+  cfg.playback = { syncIntervalMs: 30, softDriftMs: 250, hardDriftMs: 1500 };
+  const server = createApp(cfg);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const httpBase = `http://127.0.0.1:${port}`;
+  const wsBase = `ws://127.0.0.1:${port}`;
+  let ws;
+  try {
+    const created = await createRoom(httpBase, 'Drift Hint Ride');
+    ws = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await onceOpen(ws);
+    const auth = nextJson(ws, (m) => m.type === 'auth.ok');
+    ws.send(JSON.stringify({ type: 'auth', token: created.token }));
+    await auth;
+    const selected = nextJson(ws, (m) => m.type === 'playback.state' && m.playback?.trackId === 'trk-sync');
+    ws.send(JSON.stringify({ type: 'playback.select', trackId: 'trk-sync', autoplay: true, expectedEpoch: 0 }));
+    const state = await selected;
+    const sync = await nextJson(ws, (m) => m.type === 'playback.sync' && m.playback?.trackId === 'trk-sync', 1000);
+    assert.equal(sync.playback.epoch, state.playback.epoch);
+    assert.equal(sync.seq, state.seq);
+  } finally {
+    if (ws) await closeWs(ws);
+    await closeServer(server);
+  }
+});

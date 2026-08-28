@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { verifyRoomToken } from './room-token.js';
 import { acceptWebSocket } from './websocket.js';
 import { normalizeLocation } from './location.js';
+import { applyPlaybackCommand, createPlaybackState, publicPlayback, PlaybackError } from './playback.js';
 
 const CLOSE = Object.freeze({
   BAD_REQUEST: 4000,
@@ -46,7 +47,12 @@ export class RealtimeHub {
     server.on('upgrade', (req, socket, head) => this.#upgrade(req, socket, head));
     this.heartbeat = setInterval(() => this.#heartbeat(), config.realtime.heartbeatMs);
     this.heartbeat.unref?.();
-    server.on('close', () => clearInterval(this.heartbeat));
+    this.playbackTimer = setInterval(() => this.#playbackSync(), config.playback?.syncIntervalMs ?? 10_000);
+    this.playbackTimer.unref?.();
+    server.on('close', () => {
+      clearInterval(this.heartbeat);
+      clearInterval(this.playbackTimer);
+    });
   }
 
   #state(roomId) {
@@ -57,7 +63,9 @@ export class RealtimeHub {
         connections: new Map(),
         seenMembers: new Set(),
         locations: new Map(),
-        lastLocationAt: new Map()
+        lastLocationAt: new Map(),
+        playback: createPlaybackState(this.now()),
+        lastPlaybackSyncAt: 0
       };
       this.roomStates.set(roomId, state);
     }
@@ -92,7 +100,8 @@ export class RealtimeHub {
     return {
       room: this.rooms.publicRoom(room),
       members: [...room.members.values()].map((member) => publicMember(member, state.connections.has(member.id))),
-      locations: [...state.locations.entries()].map(([memberId, location]) => publicLocation(memberId, location))
+      locations: [...state.locations.entries()].map(([memberId, location]) => publicLocation(memberId, location)),
+      playback: publicPlayback(state.playback)
     };
   }
 
@@ -190,7 +199,53 @@ export class RealtimeHub {
       return;
     }
 
+    if (message.type === 'playback.state.get') {
+      const state = this.#state(room.id);
+      this.#send(connection, {
+        type: 'playback.state',
+        seq: state.seq,
+        serverTs: new Date(this.now()).toISOString(),
+        playback: publicPlayback(state.playback)
+      });
+      return;
+    }
+
+    if (message.type.startsWith('playback.')) {
+      this.#playbackCommand(connection, room, message);
+      return;
+    }
+
     connection.ws.close(CLOSE.BAD_REQUEST, 'Unsupported realtime message');
+  }
+
+  #playbackCommand(connection, room, message) {
+    if (!['host', 'co_host'].includes(connection.role)) {
+      this.#send(connection, {
+        type: 'playback.error',
+        seq: this.#state(room.id).seq,
+        serverTs: new Date(this.now()).toISOString(),
+        error: { code: 'playback_forbidden', message: 'Only the host or co-host can control room playback' }
+      });
+      return;
+    }
+
+    const state = this.#state(room.id);
+    try {
+      state.playback = applyPlaybackCommand(state.playback, message, connection.memberId, this.now());
+    } catch (error) {
+      const code = error instanceof PlaybackError ? error.code : 'playback_error';
+      this.#send(connection, {
+        type: 'playback.error',
+        seq: state.seq,
+        serverTs: new Date(this.now()).toISOString(),
+        error: { code, message: error.message || 'Playback command rejected' },
+        playback: publicPlayback(state.playback)
+      });
+      return;
+    }
+
+    const event = this.#event(room.id, 'playback.state', { playback: publicPlayback(state.playback) });
+    this.#broadcast(room.id, event);
   }
 
   #locationUpdate(connection, room, message) {
@@ -321,6 +376,20 @@ export class RealtimeHub {
         const event = this.#event(connection.roomId, 'member.offline', { member: publicMember(member, false) });
         this.#broadcast(connection.roomId, event);
       }
+    }
+  }
+
+  #playbackSync() {
+    const now = this.now();
+    for (const [roomId, state] of this.roomStates) {
+      if (!state.playback.trackId || state.playback.status !== 'playing' || state.connections.size === 0) continue;
+      state.lastPlaybackSyncAt = now;
+      this.#broadcast(roomId, {
+        type: 'playback.sync',
+        seq: state.seq,
+        serverTs: new Date(now).toISOString(),
+        playback: publicPlayback(state.playback)
+      });
     }
   }
 

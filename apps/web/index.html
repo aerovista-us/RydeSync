@@ -99,6 +99,28 @@
         <ul id="rtLocations" class="location-list"><li class="muted">No one is sharing location.</li></ul>
       </div>
 
+      <div class="playback-panel">
+        <div class="playback-head">
+          <div>
+            <div class="card-kicker">SHARED SOUNDTRACK</div>
+            <h3 id="sharedTrackTitle">No shared track</h3>
+            <p id="sharedTrackMeta" class="playback-meta">Room soundtrack is idle</p>
+          </div>
+          <div class="playback-readout">
+            <span id="sharedPlaybackState" class="playback-state">IDLE</span>
+            <small id="sharedPlaybackClock">Waiting for a host to select a track.</small>
+          </div>
+        </div>
+        <div id="sharedPlaybackControls" class="playback-controls" hidden>
+          <button id="playbackBack" type="button" class="mini">−10s</button>
+          <button id="playbackPlay" type="button" class="mini">Play</button>
+          <button id="playbackPause" type="button" class="mini">Pause</button>
+          <button id="playbackForward" type="button" class="mini">+10s</button>
+          <button id="playbackClear" type="button" class="mini danger">Clear</button>
+        </div>
+        <p class="privacy-note">The room carries only an opaque EchoVerse track ID plus server-authoritative play/pause/seek timing. Each rider must independently pass EchoVerse access before resolving metadata or audio.</p>
+      </div>
+
       <div class="echoverse-panel">
         <div class="echoverse-head">
           <div>

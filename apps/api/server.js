@@ -20,13 +20,13 @@ export function createApp(config = loadConfig()) {
     const pathname = url.pathname;
 
     if (req.method === 'GET' && pathname === '/health') {
-      return json(res, 200, { ok: true, service: 'rydesync', version: '3.0.0-alpha.4' });
+      return json(res, 200, { ok: true, service: 'rydesync', version: '3.0.0-alpha.5' });
     }
 
     if (req.method === 'GET' && pathname === '/v1/bootstrap') {
       return json(res, 200, {
         service: 'rydesync',
-        version: '3.0.0-alpha.4',
+        version: '3.0.0-alpha.5',
         identity: {
           mode: config.identity.mode,
           configured: Boolean(config.identity.baseUrl && config.identity.verifyPath),
@@ -39,7 +39,13 @@ export function createApp(config = loadConfig()) {
           realtime: true,
           liveLocation: true,
           crewMap: true,
-          echoverseCatalogProxy: true
+          echoverseCatalogProxy: true,
+          sharedPlayback: true
+        },
+        playback: {
+          syncIntervalMs: config.playback?.syncIntervalMs ?? 10000,
+          softDriftMs: config.playback?.softDriftMs ?? 250,
+          hardDriftMs: config.playback?.hardDriftMs ?? 1500
         },
         location: {
           minIntervalMs: config.location.minIntervalMs,
@@ -115,7 +121,7 @@ export function createApp(config = loadConfig()) {
       return json(res, 200, joined);
     }
 
-    const staticFiles = new Set(['/', '/app.js', '/styles.css', '/map.js', '/map-core.js']);
+    const staticFiles = new Set(['/', '/app.js', '/styles.css', '/map.js', '/map-core.js', '/sync-core.js']);
     if (req.method === 'GET' && staticFiles.has(pathname)) {
       const fileName = pathname === '/' ? 'index.html' : pathname.slice(1);
       const filePath = path.join(webRoot, fileName);

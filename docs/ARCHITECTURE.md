@@ -16,7 +16,7 @@ RydeSync is a public real-time ride/group coordination product. A person must be
 8. **Realtime credentials do not travel in URLs.** The client upgrades first, then sends the room token in an `auth` message.
 9. **Reconnect means resynchronize, not fake replay.** Until durable event history exists, a reconnect receives an authoritative snapshot. `lastSeenSeq` is carried so a future event journal can add replay without changing the client contract.
 
-## Current alpha — 3.0.0-alpha.4
+## Current alpha — 3.0.0-alpha.5
 
 Implemented:
 - dependency-free Node 22 HTTP service
@@ -44,7 +44,11 @@ Implemented:
 - interactive provider-neutral crew map over ephemeral room location
 - protected canonical EchoVerse `/api/catalog` proxy normalized as `rydesync-catalog-v1`
 - protected EchoVerse audio/file proxy with byte-range support
-- automated coverage for guest flow, token integrity/expiry, identity fail-closed behavior, realtime auth, presence, reconnect, map projection/fit, catalog normalization and media proxy
+- server-authoritative shared playback state with `playback.select`, `playback.play`, `playback.pause`, `playback.seek`, `playback.clear`, `playback.state` and `playback.sync`
+- host/co-host-only playback mutation while every rider retains independent EchoVerse entitlement enforcement
+- playback epochs reject stale controller writes instead of silently overwriting newer state
+- client/server clock estimation and portable drift-correction policy for future browser/Android media engines
+- automated coverage for guest flow, token integrity/expiry, identity fail-closed behavior, realtime auth, presence, reconnect, map projection/fit, catalog normalization, media proxy and shared playback synchronization
 
 Not implemented yet:
 - durable event journal / missed-event replay
@@ -123,6 +127,36 @@ Map behavior:
 - the server remains authoritative for when a coordinate is removed.
 
 The default OpenStreetMap tile template is a development/light-testing default, not a production scaling decision. Production can replace it through environment configuration without changing the client protocol.
+
+
+## Alpha.5 shared soundtrack control plane
+
+The room synchronization plane carries an opaque media reference and timing state, never the media stream itself:
+
+```json
+{
+  "trackId": "echoverse-track-id",
+  "status": "playing",
+  "positionMs": 42000,
+  "anchorServerTs": "2026-08-28T03:00:00.000Z",
+  "epoch": 7,
+  "updatedBy": "room-member-id"
+}
+```
+
+`positionMs` is the media position at `anchorServerTs`. While `status=playing`, a client projects the target position forward using its estimate of server time. `presence.ping/pong` provides a lightweight clock-offset estimate. The server periodically emits `playback.sync` while a room is playing; these hints do not mutate state or advance the playback epoch.
+
+Only `host` and future `co_host` room roles can mutate playback. Every mutation can carry `expectedEpoch`. If another controller has already changed the soundtrack, the stale command receives `epoch_conflict` instead of overwriting newer room state. Reconnect snapshots include the full current playback state, so cellular handoff does not require a separate music session endpoint.
+
+Control authority is intentionally separate from media entitlement. The room may know an opaque `track_id`, but catalog metadata and audio bytes remain behind `echoverse.library.listen` for each rider. A host never lends their EchoVerse access to the room.
+
+Recommended client correction policy is exposed through bootstrap thresholds:
+
+- drift `< PLAYBACK_SOFT_DRIFT_MS`: do nothing;
+- soft ≤ drift < hard: temporarily use 1.03x when behind or 0.97x when ahead;
+- drift `>= PLAYBACK_HARD_DRIFT_MS`: hard-seek to the projected room target.
+
+The browser currently renders and controls the shared state but does not attach an authenticated media element until the stable AV Identity browser-session/cookie transport exists. Android/Media3 can use the same state machine immediately once its protected media request carries the user authorization contract.
 
 ## Alpha.4 EchoVerse boundary
 

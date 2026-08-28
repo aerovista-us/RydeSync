@@ -60,6 +60,11 @@ export function loadConfig() {
       minZoom: intEnv('MAP_MIN_ZOOM', 2, { min: 0, max: 20 }),
       maxZoom: intEnv('MAP_MAX_ZOOM', 18, { min: 1, max: 22 })
     }),
+    playback: Object.freeze({
+      syncIntervalMs: intEnv('PLAYBACK_SYNC_INTERVAL_MS', 10000, { min: 3000, max: 60000 }),
+      softDriftMs: intEnv('PLAYBACK_SOFT_DRIFT_MS', 250, { min: 50, max: 2000 }),
+      hardDriftMs: intEnv('PLAYBACK_HARD_DRIFT_MS', 1500, { min: 250, max: 10000 })
+    }),
     location: Object.freeze({
       minIntervalMs: intEnv('LOCATION_MIN_INTERVAL_MS', 5000, { min: 1000, max: 60000 }),
       staleAfterMs: intEnv('LOCATION_STALE_AFTER_MS', 120000, { min: 15000, max: 900000 }),
