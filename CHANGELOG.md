@@ -1,5 +1,33 @@
 # Changelog
 
+## 3.0.0-alpha.7 — Member Entry + PTT Parity
+
+- Locked the entry UX to **Join Ryde or Sign In** for guests; `Start Ryde` is absent until a verified/local AeroVista member session exists.
+- Enforced authenticated room creation server-side while preserving frictionless guest room joins.
+- Added configurable AeroVista Access Convergence browser handoff using a short-lived one-time code, server-side exchange, state validation, and encrypted HttpOnly local `__session`.
+- Added clean fail-closed handoff outage behavior (`503 handoff_unavailable`).
+- Restored room-scoped WebRTC push-to-talk for permitted guest/member roles with explicit microphone opt-in.
+- Added a server-authoritative single-speaker talk floor and room-scoped SDP/ICE signaling over the existing authenticated realtime connection. Audio never travels over the WebSocket.
+- Added STUN/TURN bootstrap configuration and visible TURN readiness state; real cellular voice still requires a deployed/tested TURN relay.
+- Added signed-in host Lock Ryde and End Ryde controls.
+- Tightened shared soundtrack mutations to signed-in `host`/`co_host` members.
+- Added short-lived **current-room-track-only** guest media grants so legitimate guest riders can hear the host's current shared track without receiving library browse or arbitrary media access.
+- Removed native browser audio play/pause/seek controls for guest listeners; riders retain local volume, mute and Stop Listening, while shared playback authority remains host/co-host.
+- Added baseline browser security/permissions headers.
+- Automated Node/web suite: 58 passing.
+
+## 3.0.0-alpha.6 — Playback Client + Android Foundation
+
+- Added a real opt-in browser shared-audio engine driven by authoritative room playback state.
+- Added `Listen with crew`, autoplay/gesture handling, track switching, seek, pause/play mirroring, periodic synchronization, bounded rate nudges, and hard-seek drift correction.
+- Added short-lived HttpOnly same-origin EchoVerse media sessions so browser `<audio>` and artwork can load without putting AV credentials in media URLs.
+- Media sessions are issued only after live `echoverse.library.listen` authorization, are `SameSite=Strict`, path-scoped to `/v1/echoverse/`, expire automatically, refresh while actively listening, and are cleared when the user stops listening.
+- Catalog authorization remains live through AV Identity/AVCC; the media grant does not unlock catalog/room/admin APIs.
+- Added native Android project foundation under `apps/android` with Compose, Media3 `MediaLibraryService`, ExoPlayer, OkHttp API/WebSocket clients, AV Identity token-provider boundary, protected byte-range playback, and Android Auto media declaration.
+- Added a pure-Kotlin playback target/drift module matching the browser rules and validated it with `kotlinc` in this build environment.
+- Android is a client of the same public RydeSync API and does not require direct NXCore/Tailscale access.
+- Node/web automated suite: 48 passing.
+
 ## 3.0.0-alpha.5 — Shared Soundtrack Control Plane
 
 - Added server-authoritative per-room playback state.

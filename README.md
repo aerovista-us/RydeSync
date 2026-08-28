@@ -1,61 +1,125 @@
 # RydeSync — Global Foundation
 
-Global-first RydeSync foundation. Public guest ride rooms work without Tailscale or login. AeroVista Identity is the strategic account authority, but remains isolated behind an adapter while the production identity contract is stabilized. EchoVerse access is an authenticated capability and the canonical private Library API is never exposed directly to clients.
+RydeSync is a public ride-room product for small crews: frictionless joining, room-scoped realtime presence and location, push-to-talk voice, and near-synchronized EchoVerse playback. The public app does not require Tailscale. AeroVista Identity is the account authority for hosting and member capabilities; EchoVerse stays behind RydeSync's private server boundary.
+
+## Current milestone — 3.0.0-alpha.7
+
+Alpha.7 is the **member + feature-parity build** focused on the two gaps found during the alpha.6 field deploy: sign-in/hosting UX and push-to-talk.
+
+### Entry and permissions
+
+The landing contract is deliberate:
+
+- **Guest:** sees `Join Ryde` and `Sign In`. `Start Ryde` is absent.
+- **Signed-in AeroVista member:** sees `Start Ryde` and `Join Ryde`.
+- **Guest room member:** can use room presence, opt-in live location, crew map, PTT when the room mode permits it, and listen to the room's current shared track.
+- **Signed-in host/co-host:** can control the shared soundtrack. Identity alone does not grant control; room role does.
+- **EchoVerse library browse:** still requires the member's own live `echoverse.library.listen` AVCC capability.
+
+Guests never inherit the host's EchoVerse library entitlement. A guest listener receives only a short-lived media grant scoped to the room's **current track**. Shared play/pause/seek remains host/co-host authority; every rider keeps only local volume, mute, and Stop Listening.
+
+### Alpha.7 additions
+
+- AeroVista `Join Ryde` / `Sign In` landing flow with authenticated `Start Ryde`.
+- Configurable Access Convergence relying-party handoff: short-lived one-time code → server-side exchange → encrypted local `__session` browser session.
+- No Firebase or AVCC token is placed in a redirect/media URL.
+- Guest-capable WebRTC push-to-talk over the existing authenticated room WebSocket signaling plane.
+- Single server-authoritative talk floor so two riders cannot transmit over one another by accident.
+- STUN configuration plus explicit TURN readiness/status for real cellular/NAT operation.
+- Signed-in host room controls: Lock Ryde and End Ryde.
+- Signed-in + host/co-host shared music mutation policy.
+- Current-track-only guest media grants for shared listening without broader library access.
+- Guest UI exposes only local mute/volume/Stop Listening, not shared playback controls.
+- Baseline `nosniff`, referrer and browser geolocation/microphone permission headers.
+- Clean fail-closed `503 handoff_unavailable` behavior when the account handoff exchange is offline.
+
+Alpha.7 preserves the existing alpha.6 crew map, ephemeral live location, canonical EchoVerse `:5304` proxy, browser shared-audio engine, playback drift correction, and Android client foundation.
 
 ## Run
 
-Node 22+ only. No runtime npm packages are required.
+Node 22+ is required. The server has no external runtime npm dependencies.
 
 ```bash
 cp .env.example .env
-# export values from .env using your normal runtime/deploy tooling
 npm test
 npm start
 ```
 
 Open `http://localhost:9000`.
 
-## Current milestone — 3.0.0-alpha.5
+## Production identity setup
 
-- guest Start Ride / Join Ride
-- short-lived HMAC-signed room membership tokens
-- AV Identity adapter with safe `optional` mode
-- fail-closed `echoverse.library.listen` entitlement boundary
-- authenticated WebSocket room plane at `/v1/realtime`
-- live online/offline presence and authoritative room snapshots
-- reconnect/resume using the same room token and last server sequence
-- explicit opt-in live location with server + client battery/data throttling
-- immediate coordinate clearing on stop, disconnect, stale sample, or room expiry
-- **interactive crew map** with geographic tiles, pan/zoom, fit-crew, accuracy rings, heading, speed, self-marker, and stale-state treatment
-- **canonical EchoVerse catalog proxy** at `/v1/echoverse/catalog`
-- protected byte-range audio proxy at `/v1/echoverse/audio/{track_id}` for Android/Media3 and future browser-native sessions
-- protected private artwork/file proxy at `/v1/echoverse/file/{path}`
-- **server-authoritative shared soundtrack state** with host/co-host controls, per-room epochs, play/pause/seek/clear, reconnect snapshots, and periodic drift hints
-- client room-clock estimation through `presence.ping/pong`
-- portable soft-drift/hard-drift correction policy (`none` → temporary 0.97/1.03 rate nudge → hard seek)
-- browser shell sharing the same `/v1` + realtime contract intended for Android
+Do **not** guess the Access Convergence exchange endpoint. Set these to the exact proven AeroVista deployment values:
 
-Live location is intentionally ephemeral: it exists only in realtime room state and is not copied into room/member records or durable history.
+```env
+AV_IDENTITY_MODE=optional
+AV_ACCOUNT_LOGIN_URL=https://account.aerocoreos.com/login
+AV_HANDOFF_EXCHANGE_URL=<exact proven relying-party exchange endpoint>
+AV_HANDOFF_AUDIENCE=rydesync
+```
 
-EchoVerse stays private upstream. The default server target is `http://echoverse-library-api:5304`; browsers receive only RydeSync `/v1/echoverse/*` URLs. The retired `echoverse-catalog:5300` service is not used.
+`optional` is intentional during integration: public guest joining/PTT can continue if Identity is unavailable, while hosting, library access, and other protected actions still fail closed.
 
-The current browser library UI intentionally browses the catalog without claiming browser audio playback is finished. Native clients can authorize range requests with the AV bearer flow today; browser `<audio>` cannot attach that bearer header, so browser playback waits for the stable AV Identity browser-session/cookie contract rather than placing identity credentials in media URLs.
+The browser handoff creates an encrypted, HttpOnly local `__session`. If the handoff provides a reusable verifier credential, RydeSync performs live Identity/AVCC verification on protected capability checks. If it does not, the local identity can still establish signed-in hosting, but capability-gated EchoVerse library browse remains fail-closed until a live verifier path exists.
 
-The WebSocket room token is sent only after the socket opens. It is never placed in the WebSocket URL, invite URL, query string, or logs by design.
+See `docs/IDENTITY_INTEGRATION.md`.
 
-See `docs/ARCHITECTURE.md` and `docs/IDENTITY_INTEGRATION.md`.
+## Production voice setup
 
+PTT signaling travels over `/v1/realtime`; audio travels over WebRTC. The application tunnel is **not** a TURN relay.
 
-## Shared soundtrack model
+Development/same-network voice can use STUN only. Reliable cellular/NAT voice requires TURN:
 
-RydeSync synchronizes **control state, not audio bytes**. A host or co-host selects an opaque EchoVerse `track_id`; the room broadcasts that ID plus status, anchor position, server timestamp and a monotonically increasing playback epoch. Each rider must independently pass `echoverse.library.listen` before resolving metadata or media.
+```env
+VOICE_ENABLED=true
+VOICE_MAX_PEERS=12
+STUN_URLS=stun:stun.l.google.com:19302
+TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
+TURN_USERNAME=<turn username>
+TURN_CREDENTIAL=<turn credential>
+```
 
-The browser estimates server clock offset with `presence.ping/pong`. While a track is playing, the server emits periodic `playback.sync` hints without advancing the room epoch. A playback client compares its local media position with the projected room target: drift below the soft threshold is ignored, medium drift uses a bounded temporary playback-rate nudge, and large drift hard-seeks. The current browser still does not claim authenticated `<audio>` playback until the AV Identity browser-session transport is stable; Android/Media3 can apply the same timing contract to authorized range requests.
+Do not call voice production-ready until a two-phone, independent-cellular test passes. See `docs/VOICE_DEPLOYMENT.md`.
 
-## Map provider note
+## EchoVerse model
 
-The map renderer itself has no mapping SDK dependency. It consumes a configurable `{z}/{x}/{y}` raster tile template. The `.env.example` defaults to OpenStreetMap tiles for development/light testing. A production deployment should use an AeroVista-approved tile service and preserve the configured attribution.
+Canonical private upstream:
 
-## Important deployment note
+```text
+http://echoverse-library-api:5304
+```
 
-In production, set a durable `ROOM_TOKEN_SECRET` with at least 32 random characters. The service refuses to start in production without it.
+Public consumers use only RydeSync routes:
+
+- `GET /v1/echoverse/catalog` — signed-in member + live `echoverse.library.listen` capability.
+- `GET /v1/echoverse/audio/{track_id}` — full member media grant, direct authenticated native request, or current-room-track guest media grant.
+- `GET /v1/echoverse/file/{path}` — full authorized member only; room guest grants do not unlock arbitrary files/artwork.
+
+RydeSync synchronizes control state, not audio bytes. Each client independently streams the current track and applies the same room-clock/drift policy.
+
+## Realtime + privacy invariants
+
+- Room token is sent only after the WebSocket opens; never in invite or WebSocket URLs.
+- Live location is opt-in and memory-only; it clears on stop, disconnect, staleness, or room expiry.
+- Microphone capture is opt-in; PTT audio is never written to room state or sent as WebSocket payloads.
+- A room can expose an opaque track ID without exposing the private EchoVerse upstream.
+- Hosting and music control are server-enforced permissions, not UI-only hiding.
+
+## Known alpha limitations
+
+- Room/member/playback state is still memory-only; a server restart ends active Rydes.
+- No Redis/Postgres or horizontal multi-instance coordination yet.
+- TURN must be configured and field-tested on NXCore before cellular PTT is considered reliable.
+- Role promotion/co-host management UI is not yet restored, so moderated classroom/campaign voice promotion is incomplete.
+- Persistent crews, ride history/recaps, saved routes, push notifications and profile personalization are member roadmap features, not alpha.7 claims.
+- Android source exists under `apps/android`, but a full Android SDK/APK build gate still needs to run on an Android-capable build host.
+
+## Deployment
+
+Production requires a durable `ROOM_TOKEN_SECRET` of at least 32 characters. Preserve it across deploys or active room/browser/media session grants will invalidate.
+
+See:
+
+- `docs/ARCHITECTURE.md`
+- `docs/IDENTITY_INTEGRATION.md`
+- `docs/VOICE_DEPLOYMENT.md`

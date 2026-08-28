@@ -1,9 +1,9 @@
 {
   "name": "rydesync",
-  "version": "3.0.0-alpha.5",
+  "version": "3.0.0-alpha.7",
   "private": true,
   "type": "module",
-  "description": "RydeSync global-first ride platform with realtime crew map, server-authoritative shared playback, AV Identity adapter, and private EchoVerse catalog proxy.",
+  "description": "RydeSync global-first ride platform with realtime crew map, server-authoritative shared playback, protected browser audio sessions, Access Convergence sign-in, guest PTT/room controls, AV Identity adapter, Android/Media3 foundation, and private EchoVerse catalog proxy.",
   "engines": {
     "node": ">=22"
   },

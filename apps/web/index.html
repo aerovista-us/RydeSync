@@ -29,25 +29,40 @@
       </div>
     </section>
 
-    <section class="grid">
-      <article class="card">
-        <div class="card-kicker">HOST</div>
-        <h3>Start a Ride</h3>
+    <section class="grid entry-grid">
+      <article id="createCard" class="card hidden">
+        <div class="card-kicker">MEMBER HOST</div>
+        <h3>Start a Ryde</h3>
         <form id="createForm">
           <label>Ride name<input name="name" placeholder="Lake Loop" required minlength="2" maxlength="80" /></label>
           <label>Mode<select name="mode"><option value="group_ride">Group Ride</option><option value="listening_party">Listening Party</option><option value="classroom">Classroom</option><option value="band_practice">Band Practice</option><option value="campaign">Campaign</option></select></label>
-          <button type="submit">Start Ride</button>
+          <button type="submit">Start Ryde</button>
         </form>
       </article>
 
-      <article class="card">
+      <article id="joinCard" class="card">
         <div class="card-kicker">CREW</div>
-        <h3>Join a Ride</h3>
+        <h3>Join a Ryde</h3>
         <form id="joinForm">
           <label>Room ID or code<input name="room" placeholder="ABCD2345" required /></label>
           <label>Your name<input name="displayName" placeholder="Guest Rider" maxlength="60" /></label>
-          <button type="submit" class="secondary">Join Ride</button>
+          <button type="submit" class="secondary">Join Ryde</button>
         </form>
+      </article>
+
+      <article id="signInCard" class="card sign-in-card">
+        <div class="card-kicker">AEROVISTA MEMBER</div>
+        <h3>Sign In</h3>
+        <p>Start Rydes, control the shared soundtrack, keep your identity across devices, and unlock member features.</p>
+        <a id="signInButton" class="button-link" href="/auth/login">Sign in with AeroVista</a>
+        <small id="signInHint">Joining a Ryde never requires an account.</small>
+      </article>
+
+      <article id="memberCard" class="card member-card hidden">
+        <div class="card-kicker">SIGNED IN</div>
+        <h3 id="memberWelcome">AeroVista Member</h3>
+        <p>Hosting and shared music controls are unlocked. Crew/history features will attach to this identity without changing guest access.</p>
+        <a id="signOutButton" class="button-link secondary-link" href="/auth/logout">Sign out</a>
       </article>
     </section>
 
@@ -66,6 +81,36 @@
         </div>
       </div>
       <ul id="rtMembers" class="member-list"><li class="muted">Waiting for presence snapshot…</li></ul>
+
+      <div id="voicePanel" class="voice-panel">
+        <div class="voice-head">
+          <div>
+            <div class="card-kicker">PUSH TO TALK</div>
+            <p id="voiceStatus" class="voice-status">Off · microphone never starts automatically</p>
+          </div>
+          <button id="voiceEnable" type="button" class="mini">Enable PTT</button>
+        </div>
+        <button id="talkButton" type="button" class="talk-button" disabled aria-label="Hold to talk">
+          <strong id="talkLabel">HOLD TO TALK</strong>
+          <span id="talkHint">Enable microphone first</span>
+        </button>
+        <div class="voice-foot">
+          <span id="voiceSpeaker">Channel clear</span>
+          <span id="turnStatus">TURN status unknown</span>
+        </div>
+        <p class="privacy-note">PTT is available to guest riders. The WebSocket carries only room-scoped signaling and talk-floor state; voice audio travels over WebRTC.</p>
+      </div>
+
+      <div id="hostPanel" class="host-panel hidden">
+        <div>
+          <div class="card-kicker">HOST CONTROLS</div>
+          <p class="host-caption">Signed-in host controls for this Ryde.</p>
+        </div>
+        <div class="host-actions">
+          <button id="roomLockToggle" type="button" class="mini">Lock Ryde</button>
+          <button id="roomEnd" type="button" class="mini danger">End Ryde</button>
+        </div>
+      </div>
 
       <div class="location-panel">
         <div class="location-head">
@@ -118,7 +163,14 @@
           <button id="playbackForward" type="button" class="mini">+10s</button>
           <button id="playbackClear" type="button" class="mini danger">Clear</button>
         </div>
-        <p class="privacy-note">The room carries only an opaque EchoVerse track ID plus server-authoritative play/pause/seek timing. Each rider must independently pass EchoVerse access before resolving metadata or audio.</p>
+        <div class="listener-controls">
+          <button id="audioListenToggle" type="button" class="mini secondary">Listen with crew</button>
+          <button id="audioMuteToggle" type="button" class="mini">Mute</button>
+          <label class="local-volume">Volume <input id="audioVolume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Local shared music volume" /></label>
+          <span id="audioClientStatus" class="playback-client-state">OFF · audio never starts automatically</span>
+        </div>
+        <audio id="sharedAudio" class="shared-audio" preload="metadata"></audio>
+        <p class="privacy-note">Shared play/pause/seek belongs to the signed-in host or co-host. Every rider keeps local volume, mute, and Stop Listening. Guests receive only a short-lived grant for the Ryde's current shared track; signing in never loans the host's full EchoVerse library access to the room.</p>
       </div>
 
       <div class="echoverse-panel">

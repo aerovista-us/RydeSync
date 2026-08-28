@@ -146,9 +146,9 @@ The room synchronization plane carries an opaque media reference and timing stat
 
 `positionMs` is the media position at `anchorServerTs`. While `status=playing`, a client projects the target position forward using its estimate of server time. `presence.ping/pong` provides a lightweight clock-offset estimate. The server periodically emits `playback.sync` while a room is playing; these hints do not mutate state or advance the playback epoch.
 
-Only `host` and future `co_host` room roles can mutate playback. Every mutation can carry `expectedEpoch`. If another controller has already changed the soundtrack, the stale command receives `epoch_conflict` instead of overwriting newer room state. Reconnect snapshots include the full current playback state, so cellular handoff does not require a separate music session endpoint.
+Only signed-in `host` / `co_host` room members can mutate playback. Identity establishes who the controller is; room role establishes authority. Every mutation can carry `expectedEpoch`. If another controller has already changed the soundtrack, the stale command receives `epoch_conflict` instead of overwriting newer room state. Reconnect snapshots include the full current playback state, so cellular handoff does not require a separate music session endpoint.
 
-Control authority is intentionally separate from media entitlement. The room may know an opaque `track_id`, but catalog metadata and audio bytes remain behind `echoverse.library.listen` for each rider. A host never lends their EchoVerse access to the room.
+Control authority is intentionally separate from media entitlement. The room may know an opaque `track_id`; full catalog browse remains behind each member's live `echoverse.library.listen` grant. A legitimate guest room member may receive only a short-lived current-track media grant so the crew can hear the shared selection. The grant is bound to room + member + current `track_id` and never exposes the host's broader library entitlement.
 
 Recommended client correction policy is exposed through bootstrap thresholds:
 
@@ -156,7 +156,7 @@ Recommended client correction policy is exposed through bootstrap thresholds:
 - soft ≤ drift < hard: temporarily use 1.03x when behind or 0.97x when ahead;
 - drift `>= PLAYBACK_HARD_DRIFT_MS`: hard-seek to the projected room target.
 
-The browser currently renders and controls the shared state but does not attach an authenticated media element until the stable AV Identity browser-session/cookie transport exists. Android/Media3 can use the same state machine immediately once its protected media request carries the user authorization contract.
+The browser now attaches a protected same-origin audio client. Signed-in members with a live EchoVerse capability can mint a full short-lived media grant; guest room members can mint only a current-room-track grant. Android/Media3 uses the same playback state machine and protected media boundary.
 
 ## Alpha.4 EchoVerse boundary
 
@@ -203,3 +203,55 @@ The upstream URL is never returned to the client and the retired `echoverse-cata
 The proxy does not forward a user's AeroVista bearer token to EchoVerse. RydeSync performs the AV capability check first, then uses the trusted private network path. If the Library API later requires a dedicated service bearer, `ECHOVERSE_UPSTREAM_BEARER_TOKEN` is server-only.
 
 Audio and file routes preserve safe response metadata and audio byte ranges. That is suitable for Android Media3. Browser audio playback is intentionally not declared complete yet because the current AV Identity adapter resolves bearer tokens while a native `<audio>` element cannot attach that header. The stable browser-session transport should solve that boundary; do not put AV identity tokens into audio query strings as a shortcut.
+
+## Alpha.6 playback clients
+
+The control plane and media plane remain separate. Room WebSocket messages carry only authoritative playback state. A browser that has already passed live AV Identity/AVCC authorization may exchange that authorization for a short-lived HttpOnly same-origin EchoVerse **media session**. This cookie is scoped to `/v1/echoverse/`; it is not an AeroVista credential, cannot call room/admin/catalog endpoints, and is cleared when the listener opts out. Android does not need this browser cookie: Media3 requests can attach the AV bearer through the platform token-provider adapter.
+
+`apps/android` is intentionally a sibling client of this service. It does not introduce a second backend or a Tailnet-only API. The Android project owns platform concerns (Media3 service/session, Android Auto, foreground playback, device identity token retrieval); RydeSync server remains the public room/media boundary.
+
+
+## Alpha.7 member entry, guest listening and PTT
+
+### Entry contract
+
+```text
+Guest landing
+  +-- Join Ryde
+  +-- Sign In
+  `-- no Start Ryde action
+
+AeroVista member session
+  +-- Start Ryde
+  +-- Join Ryde
+  `-- member capability surfaces
+```
+
+`POST /v1/rooms` requires authenticated identity on the server. `POST /v1/rooms/:code/join` remains guest-capable. This prevents anonymous room ownership while preserving invite frictionlessness.
+
+The browser sign-in boundary uses the existing Access Convergence shape: `/auth/login` creates a random state and redirects to the account site; `/auth/callback` validates state and exchanges the returned one-time code server-side; RydeSync then stores a local encrypted HttpOnly `__session`. The exact exchange endpoint is deployment configuration and is not inferred from naming.
+
+### Shared music permissions
+
+```text
+Guest rider
+  +-- hear current shared track
+  +-- local volume / mute / Stop Listening
+  `-- cannot browse library or mutate room playback
+
+Signed-in host/co-host
+  +-- play / pause / seek / select / clear shared playback
+  `-- can browse EchoVerse only when AVCC grants echoverse.library.listen
+```
+
+The guest media grant is purposefully narrower than an EchoVerse entitlement. Audio requests recheck that the room exists, the member still belongs to it, and the requested track is still the room's current track. Arbitrary `/v1/echoverse/file/*` access is not included.
+
+### Push-to-talk
+
+PTT reuses the authenticated room WebSocket as a control/signaling plane and WebRTC as the media plane. After a rider explicitly grants microphone access, `voice.join` registers that room member with the voice mesh. SDP/ICE is forwarded only to another active member in the same room. A single server-owned `voiceFloorMemberId` controls who may transmit; the browser enables its local audio track only after receiving floor ownership and disables it immediately on release/disconnect.
+
+STUN-only operation is useful for development and some same-network/NAT cases. `TURN_URLS` + credentials must be configured and tested with two independent cellular clients before production voice reliability is claimed. Cloudflare Tunnel carries HTTPS/WebSocket traffic and does not replace TURN.
+
+### Remaining durability boundary
+
+Rooms, membership, playback, location, voice-floor state and sequence state are still process-memory state in alpha.7. A process restart ends active Rydes. Redis/Postgres durability and multi-instance realtime coordination remain a later production-hardening gate.

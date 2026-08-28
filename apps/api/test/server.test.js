@@ -7,33 +7,42 @@ function config() {
     nodeEnv: 'test', port: 0, publicBaseUrl: 'http://127.0.0.1',
     roomTokenSecret: 't'.repeat(48), generatedDevSecret: false,
     roomTtlSeconds: 3600, memberTokenTtlSeconds: 3600,
-    identity: { mode: 'optional', baseUrl: '', verifyPath: '', timeoutMs: 250, appId: 'rydesync', loginUrl: '' },
+    identity: { mode: 'optional', baseUrl: '', verifyPath: '', timeoutMs: 250, appId: 'rydesync', loginUrl: '', verifyToken: async () => ({ identity_id: 'identity_test_host', display_name: 'Test Host', capabilities: [] }) },
     realtime: { authTimeoutMs: 5000, heartbeatMs: 60000, maxMessageBytes: 32768 },
     location: { minIntervalMs: 1000, staleAfterMs: 120000, maxClientAgeMs: 30000, maxFutureSkewMs: 10000, maxAccuracyMeters: 5000 },
     echoverse: { libraryApiUrl: 'http://echoverse-library-api:5304' }
   };
 }
 
-async function withServer(fn) {
-  const server = createApp(config());
+async function withServer(fn, cfg = config()) {
+  const server = createApp(cfg);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   try { await fn(`http://127.0.0.1:${port}`); }
   finally { await new Promise((resolve) => server.close(resolve)); }
 }
 
-test('health and guest room flow work without AV Identity configured', async () => {
+test('guest can join but must sign in to start a Ryde', async () => {
   await withServer(async (base) => {
     assert.equal((await fetch(`${base}/health`)).status, 200);
+    const guestCreate = await fetch(`${base}/v1/rooms`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Guest Cannot Host' })
+    });
+    assert.equal(guestCreate.status, 401);
+
     const createdRes = await fetch(`${base}/v1/rooms`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Global Test' })
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer test-host' }, body: JSON.stringify({ name: 'Global Test' })
     });
     assert.equal(createdRes.status, 201);
     const created = await createdRes.json();
+    assert.equal(created.member.identityId, 'identity_test_host');
+
     const joinedRes = await fetch(`${base}/v1/rooms/${created.room.joinCode}/join`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Rider 2' })
     });
     assert.equal(joinedRes.status, 200);
+    const joined = await joinedRes.json();
+    assert.equal(joined.member.identityId, null);
   });
 });
 
@@ -47,6 +56,8 @@ test('EchoVerse entitlement route fails closed for guests', async () => {
 });
 
 test('optional identity outage degrades public session to guest but never grants EchoVerse', async () => {
+  const cfg = config();
+  cfg.identity = { ...cfg.identity, verifyToken: async () => { throw new Error('gateway offline'); } };
   await withServer(async (base) => {
     const headers = { authorization: 'Bearer deliberately-unverifiable-token' };
     const sessionRes = await fetch(`${base}/v1/session`, { headers });
@@ -57,12 +68,12 @@ test('optional identity outage degrades public session to guest but never grants
 
     const accessRes = await fetch(`${base}/v1/echoverse/access`, { headers });
     assert.equal(accessRes.status, 401);
-  });
+  }, cfg);
 });
 
 test('required identity mode surfaces unavailable identity instead of pretending auth succeeded', async () => {
   const cfg = config();
-  cfg.identity = { ...cfg.identity, mode: 'required' };
+  cfg.identity = { ...cfg.identity, mode: 'required', verifyToken: async () => { throw new Error('gateway offline'); } };
   const server = createApp(cfg);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
@@ -73,6 +84,21 @@ test('required identity mode surfaces unavailable identity instead of pretending
     assert.equal(response.status, 503);
     const body = await response.json();
     assert.equal(body.error.code, 'identity_unavailable');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('public responses carry baseline browser security and permission headers', async () => {
+  const cfg = config();
+  const server = createApp(cfg);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/health`);
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('referrer-policy'), 'same-origin');
+    assert.equal(response.headers.get('permissions-policy'), 'geolocation=(self), microphone=(self), camera=()');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -10,6 +10,12 @@ function intEnv(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {})
   return value;
 }
 
+function csvEnv(name, fallback = []) {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  return raw.split(',').map((value) => value.trim()).filter(Boolean);
+}
+
 function identityMode(raw = 'optional') {
   if (!['off', 'optional', 'required'].includes(raw)) {
     throw new Error('AV_IDENTITY_MODE must be off, optional, or required');
@@ -46,7 +52,22 @@ export function loadConfig() {
       verifyPath: process.env.AV_IDENTITY_VERIFY_PATH || '',
       timeoutMs: intEnv('AV_IDENTITY_TIMEOUT_MS', 2500, { min: 250, max: 15_000 }),
       appId: process.env.AV_IDENTITY_APP_ID || 'rydesync',
-      loginUrl: process.env.AV_ACCOUNT_LOGIN_URL || ''
+      loginUrl: process.env.AV_ACCOUNT_LOGIN_URL || '',
+      handoffExchangeUrl: process.env.AV_HANDOFF_EXCHANGE_URL || '',
+      handoffAudience: process.env.AV_HANDOFF_AUDIENCE || 'rydesync',
+      handoffReturnParam: process.env.AV_HANDOFF_RETURN_PARAM || 'return_to',
+      handoffStateParam: process.env.AV_HANDOFF_STATE_PARAM || 'state',
+      handoffAudienceParam: process.env.AV_HANDOFF_AUDIENCE_PARAM || 'audience',
+      handoffCodeParam: process.env.AV_HANDOFF_CODE_PARAM || 'code',
+      browserSessionTtlSeconds: intEnv('AV_BROWSER_SESSION_TTL_SECONDS', 900, { min: 60, max: 86400 })
+    }),
+    voice: Object.freeze({
+      enabled: (process.env.VOICE_ENABLED || 'true').toLowerCase() !== 'false',
+      maxPeers: intEnv('VOICE_MAX_PEERS', 12, { min: 2, max: 24 }),
+      stunUrls: csvEnv('STUN_URLS', ['stun:stun.l.google.com:19302']),
+      turnUrls: csvEnv('TURN_URLS'),
+      turnUsername: process.env.TURN_USERNAME || '',
+      turnCredential: process.env.TURN_CREDENTIAL || ''
     }),
     realtime: Object.freeze({
       authTimeoutMs: intEnv('REALTIME_AUTH_TIMEOUT_MS', 10_000, { min: 1_000, max: 60_000 }),
@@ -75,7 +96,8 @@ export function loadConfig() {
     echoverse: Object.freeze({
       libraryApiUrl: process.env.ECHOVERSE_LIBRARY_API_URL || 'http://echoverse-library-api:5304',
       timeoutMs: intEnv('ECHOVERSE_TIMEOUT_MS', 5000, { min: 500, max: 30000 }),
-      serviceToken: process.env.ECHOVERSE_UPSTREAM_BEARER_TOKEN || ''
+      serviceToken: process.env.ECHOVERSE_UPSTREAM_BEARER_TOKEN || '',
+      mediaSessionTtlSeconds: intEnv('ECHOVERSE_MEDIA_SESSION_TTL_SECONDS', 600, { min: 60, max: 3600 })
     })
   });
 }

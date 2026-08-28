@@ -1,4 +1,5 @@
 import { HttpError } from './http.js';
+import { browserSessionFromRequest } from './browser-session.js';
 
 export class IdentityContractError extends Error {
   constructor(message) {
@@ -14,6 +15,7 @@ const guest = (authState = 'anonymous', reason = null) => Object.freeze({
   displayName: null,
   email: null,
   capabilities: [],
+  capabilitiesFresh: false,
   authState,
   reason
 });
@@ -48,12 +50,34 @@ export function mapAvIdentityPayload(payload) {
     displayName: typeof displayName === 'string' ? displayName : null,
     email: typeof email === 'string' ? email : null,
     capabilities: Object.freeze([...new Set(capabilities)]),
+    capabilitiesFresh: true,
     authState: 'verified',
     reason: null
   });
 }
 
-async function verifyWithAeroVista(token, config) {
+function snapshotPrincipal(session) {
+  const principal = session?.principal;
+  if (!principal?.identityId) return null;
+  return Object.freeze({
+    kind: 'member',
+    authenticated: true,
+    identityId: principal.identityId,
+    displayName: principal.displayName || null,
+    email: principal.email || null,
+    capabilities: Object.freeze(Array.isArray(principal.capabilities) ? [...new Set(principal.capabilities)] : []),
+    capabilitiesFresh: false,
+    authState: 'handoff_session',
+    reason: 'live_capabilities_not_verified'
+  });
+}
+
+export async function verifyWithAeroVista(token, config) {
+  if (typeof config.identity.verifyToken === 'function') {
+    const result = await config.identity.verifyToken(token);
+    return result?.kind === 'member' ? Object.freeze({ ...result, capabilitiesFresh: result.capabilitiesFresh !== false }) : mapAvIdentityPayload(result);
+  }
+
   if (!config.identity.baseUrl || !config.identity.verifyPath) {
     throw new IdentityContractError('AeroVista Identity verification endpoint is not configured');
   }
@@ -85,22 +109,43 @@ async function verifyWithAeroVista(token, config) {
 
 export async function resolveIdentity(req, config) {
   const token = bearer(req);
-  if (!token) return guest();
-  if (config.identity.mode === 'off') return guest('disabled', 'identity_disabled');
-
-  try {
-    return await verifyWithAeroVista(token, config);
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 401) throw error;
-    if (config.identity.mode === 'required') {
-      throw new HttpError(503, 'identity_unavailable', 'AeroVista Identity is unavailable', {
-        cause: error?.name || 'IdentityError'
-      });
+  if (token) {
+    if (config.identity.mode === 'off') return guest('disabled', 'identity_disabled');
+    try {
+      return await verifyWithAeroVista(token, config);
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 401) throw error;
+      if (config.identity.mode === 'required') {
+        throw new HttpError(503, 'identity_unavailable', 'AeroVista Identity is unavailable', {
+          cause: error?.name || 'IdentityError'
+        });
+      }
+      return guest('unavailable', error?.message || 'identity_unavailable');
     }
-    // Optional mode does NOT grant privileges. Public/guest-capable routes may continue,
-    // while protected routes must still reject this principal.
-    return guest('unavailable', error?.message || 'identity_unavailable');
   }
+
+  if (config.identity.mode === 'off') return guest('disabled', 'identity_disabled');
+  const browserSession = browserSessionFromRequest(req, config);
+  if (!browserSession) return guest();
+
+  if (browserSession.upstreamToken) {
+    try {
+      return await verifyWithAeroVista(browserSession.upstreamToken, config);
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 401) throw error;
+      if (config.identity.mode === 'required') {
+        throw new HttpError(503, 'identity_unavailable', 'AeroVista Identity is unavailable', {
+          cause: error?.name || 'IdentityError'
+        });
+      }
+      return guest('unavailable', error?.message || 'identity_unavailable');
+    }
+  }
+
+  // A successfully exchanged one-time handoff can establish local identity even if the
+  // upstream did not return a reusable verifier credential. Capability-gated actions
+  // still fail closed because this snapshot is explicitly marked non-fresh.
+  return snapshotPrincipal(browserSession) || guest();
 }
 
 export function requireIdentity(principal) {
@@ -112,6 +157,9 @@ export function requireIdentity(principal) {
 
 export function requireCapability(principal, capability) {
   requireIdentity(principal);
+  if (principal.capabilitiesFresh === false) {
+    throw new HttpError(503, 'identity_unavailable', 'Live AeroVista authorization is required for this capability');
+  }
   if (!principal.capabilities.includes(capability)) {
     throw new HttpError(403, 'capability_required', `Missing required capability: ${capability}`);
   }
