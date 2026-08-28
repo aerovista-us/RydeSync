@@ -7,6 +7,7 @@ import { HttpError, json, readJson } from './lib/http.js';
 import { resolveIdentity, requireCapability } from './lib/identity.js';
 import { RoomStore } from './lib/rooms.js';
 import { RealtimeHub } from './lib/realtime.js';
+import { echoverseAudioPath, echoverseFilePath, fetchCatalog, proxyEchoVerseBinary } from './lib/echoverse.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../web');
@@ -19,13 +20,13 @@ export function createApp(config = loadConfig()) {
     const pathname = url.pathname;
 
     if (req.method === 'GET' && pathname === '/health') {
-      return json(res, 200, { ok: true, service: 'rydesync', version: '3.0.0-alpha.3' });
+      return json(res, 200, { ok: true, service: 'rydesync', version: '3.0.0-alpha.4' });
     }
 
     if (req.method === 'GET' && pathname === '/v1/bootstrap') {
       return json(res, 200, {
         service: 'rydesync',
-        version: '3.0.0-alpha.3',
+        version: '3.0.0-alpha.4',
         identity: {
           mode: config.identity.mode,
           configured: Boolean(config.identity.baseUrl && config.identity.verifyPath),
@@ -36,11 +37,24 @@ export function createApp(config = loadConfig()) {
           avIdentity: config.identity.mode !== 'off',
           echoverseEntitlementGate: true,
           realtime: true,
-          liveLocation: true
+          liveLocation: true,
+          crewMap: true,
+          echoverseCatalogProxy: true
         },
         location: {
           minIntervalMs: config.location.minIntervalMs,
           staleAfterMs: config.location.staleAfterMs
+        },
+        map: {
+          tileUrlTemplate: config.map?.tileUrlTemplate || '',
+          attribution: config.map?.attribution || '',
+          attributionUrl: config.map?.attributionUrl || '',
+          minZoom: config.map?.minZoom ?? 2,
+          maxZoom: config.map?.maxZoom ?? 18
+        },
+        echoverse: {
+          contract: 'rydesync-catalog-v1',
+          upstream: 'private-canonical-library-api'
         }
       });
     }
@@ -59,6 +73,26 @@ export function createApp(config = loadConfig()) {
         capability: 'echoverse.library.listen',
         upstreamExposed: false
       });
+    }
+
+    if (req.method === 'GET' && pathname === '/v1/echoverse/catalog') {
+      const principal = await resolveIdentity(req, config);
+      requireCapability(principal, 'echoverse.library.listen');
+      return json(res, 200, await fetchCatalog(req, config));
+    }
+
+    const audioMatch = /^\/v1\/echoverse\/audio\/([^/]+)$/.exec(pathname);
+    if (req.method === 'GET' && audioMatch) {
+      const principal = await resolveIdentity(req, config);
+      requireCapability(principal, 'echoverse.library.listen');
+      return proxyEchoVerseBinary(req, res, config, echoverseAudioPath(decodeURIComponent(audioMatch[1])));
+    }
+
+    const fileMatch = /^\/v1\/echoverse\/file\/(.+)$/.exec(pathname);
+    if (req.method === 'GET' && fileMatch) {
+      const principal = await resolveIdentity(req, config);
+      requireCapability(principal, 'echoverse.library.listen');
+      return proxyEchoVerseBinary(req, res, config, echoverseFilePath(decodeURIComponent(fileMatch[1])));
     }
 
     if (req.method === 'POST' && pathname === '/v1/rooms') {
@@ -81,7 +115,8 @@ export function createApp(config = loadConfig()) {
       return json(res, 200, joined);
     }
 
-    if (req.method === 'GET' && (pathname === '/' || pathname === '/app.js' || pathname === '/styles.css')) {
+    const staticFiles = new Set(['/', '/app.js', '/styles.css', '/map.js', '/map-core.js']);
+    if (req.method === 'GET' && staticFiles.has(pathname)) {
       const fileName = pathname === '/' ? 'index.html' : pathname.slice(1);
       const filePath = path.join(webRoot, fileName);
       const content = await fs.readFile(filePath);

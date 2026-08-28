@@ -1,8 +1,10 @@
+import { CrewMap } from '/map.js';
 const $ = (selector) => document.querySelector(selector);
 const result = $('#result');
 const realtimePanel = $('#realtimePanel');
 let bootstrap = null;
 let realtime = null;
+let crewMap = null;
 const locationShare = {
   watchId: null,
   enabled: false,
@@ -36,6 +38,7 @@ async function refreshIdentity() {
   $('#identityMode').textContent = bootstrap.identity.mode.toUpperCase();
   $('#realtimeMode').textContent = bootstrap.features.realtime ? 'LIVE' : 'OFF';
   $('#locationMode').textContent = bootstrap.features.liveLocation ? 'OPT-IN' : 'OFF';
+  ensureCrewMap();
   const session = await api('/v1/session');
   const pill = $('#identityPill');
   pill.classList.remove('connected', 'warn');
@@ -48,6 +51,10 @@ async function refreshIdentity() {
   } else {
     pill.textContent = 'Guest';
   }
+  const ev = $('#echoverseStatus');
+  if (ev) ev.textContent = session.principal.authenticated
+    ? 'Signed in · library access depends on your AVCC capability grant.'
+    : 'Sign in with AeroVista Identity to access the private EchoVerse library.';
 }
 
 function sessionKey(roomId) {
@@ -70,6 +77,32 @@ function memberName(memberId) {
   return realtime?.members?.find((member) => member.id === memberId)?.displayName || 'Rider';
 }
 
+function ensureCrewMap() {
+  if (crewMap || !bootstrap?.features?.crewMap) return;
+  const element = $('#crewMap');
+  if (!element) return;
+  crewMap = new CrewMap(element, {
+    ...(bootstrap.map || {}),
+    staleAfterMs: bootstrap.location?.staleAfterMs || 120000
+  });
+  const attribution = $('#mapAttribution');
+  if (attribution) {
+    attribution.textContent = bootstrap.map?.attribution || '';
+    attribution.href = bootstrap.map?.attributionUrl || '#';
+    attribution.hidden = !bootstrap.map?.attribution;
+  }
+}
+
+function renderCrewMap({ autoFit = false } = {}) {
+  ensureCrewMap();
+  if (!crewMap) return;
+  crewMap.setLocations(realtime ? [...realtime.locations.values()] : [], {
+    members: realtime?.members || [],
+    selfMemberId: realtime?.session?.member?.id || null,
+    autoFit
+  });
+}
+
 function renderLocations() {
   const list = $('#rtLocations');
   if (!list) return;
@@ -81,6 +114,7 @@ function renderLocations() {
         <span><strong>${escapeHtml(memberName(entry.memberId))}</strong><small>${entry.latitude.toFixed(5)}, ${entry.longitude.toFixed(5)} · ±${Math.round(entry.accuracy)}m</small></span>
       </li>`).join('')
     : '<li class="muted">No one is sharing location.</li>';
+  renderCrewMap();
 }
 
 function renderLocationControl(label = null, tone = '') {
@@ -242,6 +276,7 @@ function connectRealtime(session) {
         realtime.members = Array.isArray(message.members) ? message.members : [];
         realtime.locations = new Map((Array.isArray(message.locations) ? message.locations : []).map((entry) => [entry.memberId, entry]));
         renderRealtime({ label: 'LIVE', tone: 'online', seq: message.seq, room: message.room, members: realtime.members });
+        renderCrewMap({ autoFit: true });
       } else if (message.type === 'member.online' || message.type === 'member.offline') {
         const member = message.member;
         const index = realtime.members.findIndex((candidate) => candidate.id === member.id);
@@ -286,6 +321,46 @@ function connectRealtime(session) {
   };
 
   open();
+}
+
+
+function normalizeTrackList(body) {
+  return Array.isArray(body?.tracks) ? body.tracks : [];
+}
+
+function renderEchoVerseTracks(body) {
+  const host = $('#echoverseTracks');
+  const tracks = normalizeTrackList(body).slice(0, 12);
+  host.innerHTML = tracks.length ? tracks.map((track) => `
+    <article class="track-card">
+      <div class="track-art">${track.artworkUrl ? `<img src="${escapeHtml(track.artworkUrl)}" alt="" />` : '<span>EV</span>'}</div>
+      <div class="track-copy">
+        <strong>${escapeHtml(track.title || 'Untitled track')}</strong>
+        <small>${escapeHtml([track.artist, track.album].filter(Boolean).join(' · ') || 'EchoVerse')}</small>
+      </div>
+      <span class="track-stream-state">Protected stream route ready</span>
+    </article>`).join('') : '<div class="muted">No tracks returned by the current catalog contract.</div>';
+}
+
+async function loadEchoVerseCatalog() {
+  const status = $('#echoverseStatus');
+  const button = $('#echoverseLoad');
+  button.disabled = true;
+  status.textContent = 'Checking AeroVista access and loading the canonical catalog…';
+  try {
+    const body = await api('/v1/echoverse/catalog');
+    renderEchoVerseTracks(body);
+    status.textContent = `${body.total ?? body.tracks?.length ?? 0} track${(body.total ?? body.tracks?.length ?? 0) === 1 ? '' : 's'} available through RydeSync.`;
+    status.className = 'echoverse-status online';
+  } catch (error) {
+    const code = error.body?.error?.code;
+    status.textContent = code === 'auth_required' ? 'AeroVista sign-in required for EchoVerse.'
+      : code === 'capability_required' ? 'Your account does not currently have EchoVerse Library access.'
+        : `Library unavailable: ${error.body?.error?.message || error.message}`;
+    status.className = 'echoverse-status error';
+  } finally {
+    button.disabled = false;
+  }
 }
 
 $('#createForm').addEventListener('submit', async (event) => {
@@ -337,6 +412,11 @@ $('#locationToggle').addEventListener('click', () => {
   if (locationShare.enabled) stopLocationSharing({ notifyServer: true });
   else startLocationSharing();
 });
+
+$('#mapFit').addEventListener('click', () => crewMap?.fitCrew());
+$('#mapZoomIn').addEventListener('click', () => { if (crewMap) { crewMap.userInteracted = true; crewMap.zoomBy(1); } });
+$('#mapZoomOut').addEventListener('click', () => { if (crewMap) { crewMap.userInteracted = true; crewMap.zoomBy(-1); } });
+$('#echoverseLoad').addEventListener('click', loadEchoVerseCatalog);
 
 const incomingRoom = new URLSearchParams(location.search).get('room');
 if (incomingRoom) {

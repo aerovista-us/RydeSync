@@ -76,7 +76,39 @@
           <button id="locationToggle" type="button" class="mini location-toggle">Share my location</button>
         </div>
         <p class="privacy-note">Visible only to authenticated members of this ride. Coordinates are ephemeral and are cleared when you stop, disconnect, go stale, or the room expires.</p>
+
+        <div class="crew-map-shell">
+          <div class="map-toolbar">
+            <div>
+              <div class="card-kicker">CREW MAP</div>
+              <p class="map-caption">Live room positions. Drag to pan, wheel/pinch to zoom, or fit the crew.</p>
+            </div>
+            <div class="map-actions">
+              <button id="mapFit" type="button" class="mini">Fit crew</button>
+              <button id="mapZoomOut" type="button" class="mini map-icon" aria-label="Zoom out">−</button>
+              <button id="mapZoomIn" type="button" class="mini map-icon" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+          <div id="crewMap" class="crew-map" role="application" aria-label="Live crew map"></div>
+          <div class="map-foot">
+            <a id="mapAttribution" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <span>Location remains room-scoped and ephemeral.</span>
+          </div>
+        </div>
+
         <ul id="rtLocations" class="location-list"><li class="muted">No one is sharing location.</li></ul>
+      </div>
+
+      <div class="echoverse-panel">
+        <div class="echoverse-head">
+          <div>
+            <div class="card-kicker">ECHOVERSE LIBRARY</div>
+            <p id="echoverseStatus" class="echoverse-status">AeroVista Identity controls library access.</p>
+          </div>
+          <button id="echoverseLoad" type="button" class="mini">Load library</button>
+        </div>
+        <p class="privacy-note">RydeSync talks to the canonical EchoVerse Library API server-side. The private upstream address is never exposed to the browser.</p>
+        <div id="echoverseTracks" class="track-grid"><div class="muted">Library not loaded.</div></div>
       </div>
     </section>
 

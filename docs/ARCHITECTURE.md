@@ -16,7 +16,7 @@ RydeSync is a public real-time ride/group coordination product. A person must be
 8. **Realtime credentials do not travel in URLs.** The client upgrades first, then sends the room token in an `auth` message.
 9. **Reconnect means resynchronize, not fake replay.** Until durable event history exists, a reconnect receives an authoritative snapshot. `lastSeenSeq` is carried so a future event journal can add replay without changing the client contract.
 
-## Current alpha — 3.0.0-alpha.3
+## Current alpha — 3.0.0-alpha.4
 
 Implemented:
 - dependency-free Node 22 HTTP service
@@ -41,13 +41,15 @@ Implemented:
 - location is cleared on explicit stop, disconnect, staleness, or room expiry
 - web client does not persist the location-sharing choice across a full reload
 - zero-dependency responsive web shell
-- automated coverage for guest flow, token integrity/expiry, identity fail-closed behavior, realtime auth, presence and reconnect
+- interactive provider-neutral crew map over ephemeral room location
+- protected canonical EchoVerse `/api/catalog` proxy normalized as `rydesync-catalog-v1`
+- protected EchoVerse audio/file proxy with byte-range support
+- automated coverage for guest flow, token integrity/expiry, identity fail-closed behavior, realtime auth, presence, reconnect, map projection/fit, catalog normalization and media proxy
 
 Not implemented yet:
 - durable event journal / missed-event replay
 - WebRTC/PTT voice
 - persistent room/crew database
-- EchoVerse catalog proxy implementation
 - production AV Identity endpoint mapping
 - Android client
 - push notifications
@@ -93,3 +95,77 @@ Location is a room-session signal, not profile data. A client must explicitly op
 The alpha stores the latest coordinate only in `RealtimeHub` memory. It is not written to `RoomStore`, files, account records, or ride history. The server validates coordinate ranges and client timestamps, enforces a minimum update interval, and removes coordinates when sharing stops, the member disconnects, the sample becomes stale, or the room expires.
 
 The web client also performs movement/time throttling before sending updates. A native Android client can use the same `location.update` message from a foreground ride service. Android-specific background permissions and battery policy belong in the client, not in a second backend contract.
+
+## Alpha.4 crew map
+
+The crew map is a browser presentation of the existing ephemeral `location.member` room signal. It does not introduce another location store. The map consumes the same `room.snapshot.locations` and realtime location events that Android will consume later.
+
+The map renderer is provider-neutral and dependency-light. It implements Web Mercator/raster tile placement directly in the web client and receives only public map configuration from `/v1/bootstrap`:
+
+```text
+map.tileUrlTemplate
+map.attribution
+map.attributionUrl
+map.minZoom
+map.maxZoom
+```
+
+Map behavior:
+
+- first live location auto-centers the map;
+- multi-rider snapshots can auto-fit the crew;
+- a rider can manually pan/zoom without the map fighting them on every GPS sample;
+- `Fit crew` restores group framing;
+- accuracy is displayed as a geographic ring;
+- heading rotates a marker indicator when the device reports it;
+- speed is presentation-only and derived from the current ephemeral sample;
+- aging/stale visual treatment uses the same server staleness budget;
+- the server remains authoritative for when a coordinate is removed.
+
+The default OpenStreetMap tile template is a development/light-testing default, not a production scaling decision. Production can replace it through environment configuration without changing the client protocol.
+
+## Alpha.4 EchoVerse boundary
+
+RydeSync now owns the public consumer boundary for its EchoVerse integration:
+
+```text
+Browser / Android
+      |
+      | AV Identity / RydeSync authorization
+      v
+RydeSync /v1/echoverse/*
+      |
+      | private server-to-server request
+      v
+http://echoverse-library-api:5304
+      |
+      +-- /api/catalog
+      +-- /api/audio/{track_id}
+      +-- /api/file/{path}
+```
+
+The upstream URL is never returned to the client and the retired `echoverse-catalog:5300` service is not used.
+
+`GET /v1/echoverse/catalog` requires `echoverse.library.listen`, calls the existing canonical `/api/catalog` RydeSync dump, and normalizes it to a stable product contract:
+
+```json
+{
+  "contract": "rydesync-catalog-v1",
+  "source": "echoverse-library-api",
+  "total": 1,
+  "tracks": [
+    {
+      "id": "track-id",
+      "title": "Track title",
+      "artist": "Artist",
+      "album": "Album",
+      "artworkUrl": null,
+      "streamUrl": "/v1/echoverse/audio/track-id"
+    }
+  ]
+}
+```
+
+The proxy does not forward a user's AeroVista bearer token to EchoVerse. RydeSync performs the AV capability check first, then uses the trusted private network path. If the Library API later requires a dedicated service bearer, `ECHOVERSE_UPSTREAM_BEARER_TOKEN` is server-only.
+
+Audio and file routes preserve safe response metadata and audio byte ranges. That is suitable for Android Media3. Browser audio playback is intentionally not declared complete yet because the current AV Identity adapter resolves bearer tokens while a native `<audio>` element cannot attach that header. The stable browser-session transport should solve that boundary; do not put AV identity tokens into audio query strings as a shortcut.

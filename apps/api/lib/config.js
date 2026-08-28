@@ -53,6 +53,13 @@ export function loadConfig() {
       heartbeatMs: intEnv('REALTIME_HEARTBEAT_MS', 25_000, { min: 5_000, max: 120_000 }),
       maxMessageBytes: intEnv('REALTIME_MAX_MESSAGE_BYTES', 32_768, { min: 1_024, max: 262_144 })
     }),
+    map: Object.freeze({
+      tileUrlTemplate: process.env.MAP_TILE_URL_TEMPLATE || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: process.env.MAP_ATTRIBUTION || '© OpenStreetMap contributors',
+      attributionUrl: process.env.MAP_ATTRIBUTION_URL || 'https://www.openstreetmap.org/copyright',
+      minZoom: intEnv('MAP_MIN_ZOOM', 2, { min: 0, max: 20 }),
+      maxZoom: intEnv('MAP_MAX_ZOOM', 18, { min: 1, max: 22 })
+    }),
     location: Object.freeze({
       minIntervalMs: intEnv('LOCATION_MIN_INTERVAL_MS', 5000, { min: 1000, max: 60000 }),
       staleAfterMs: intEnv('LOCATION_STALE_AFTER_MS', 120000, { min: 15000, max: 900000 }),
@@ -61,7 +68,9 @@ export function loadConfig() {
       maxAccuracyMeters: intEnv('LOCATION_MAX_ACCURACY_METERS', 5000, { min: 50, max: 50000 })
     }),
     echoverse: Object.freeze({
-      libraryApiUrl: process.env.ECHOVERSE_LIBRARY_API_URL || 'http://echoverse-library-api:5304'
+      libraryApiUrl: process.env.ECHOVERSE_LIBRARY_API_URL || 'http://echoverse-library-api:5304',
+      timeoutMs: intEnv('ECHOVERSE_TIMEOUT_MS', 5000, { min: 500, max: 30000 }),
+      serviceToken: process.env.ECHOVERSE_UPSTREAM_BEARER_TOKEN || ''
     })
   });
 }

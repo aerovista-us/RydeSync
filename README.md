@@ -1,10 +1,10 @@
 # RydeSync — Global Foundation
 
-Global-first RydeSync foundation. Public guest ride rooms work without Tailscale or login. AeroVista Identity is the strategic account authority, but remains isolated behind an adapter while the production identity contract is stabilized. EchoVerse access is modeled as an authenticated capability and the private library upstream is never exposed to clients.
+Global-first RydeSync foundation. Public guest ride rooms work without Tailscale or login. AeroVista Identity is the strategic account authority, but remains isolated behind an adapter while the production identity contract is stabilized. EchoVerse access is an authenticated capability and the canonical private Library API is never exposed directly to clients.
 
 ## Run
 
-Node 22+ only. No runtime packages are required.
+Node 22+ only. No runtime npm packages are required.
 
 ```bash
 cp .env.example .env
@@ -15,30 +15,36 @@ npm start
 
 Open `http://localhost:9000`.
 
-## Current milestone — 3.0.0-alpha.3
+## Current milestone — 3.0.0-alpha.4
 
 - guest Start Ride / Join Ride
 - short-lived HMAC-signed room membership tokens
 - AV Identity adapter with safe `optional` mode
 - fail-closed `echoverse.library.listen` entitlement boundary
 - authenticated WebSocket room plane at `/v1/realtime`
-- live online/offline presence
-- authoritative room snapshots
+- live online/offline presence and authoritative room snapshots
 - reconnect/resume using the same room token and last server sequence
-- stale socket replacement when the same member reconnects
-- browser exponential reconnect with full-page session restore
-- heartbeat/ping cleanup for dead sockets
-- explicit opt-in live location over the authenticated room socket
-- server + client location throttling for battery/data protection
+- explicit opt-in live location with server + client battery/data throttling
 - immediate coordinate clearing on stop, disconnect, stale sample, or room expiry
-- browser location sharing never auto-resumes after full-page reload
+- **interactive crew map** with geographic tiles, pan/zoom, fit-crew, accuracy rings, heading, speed, self-marker, and stale-state treatment
+- **canonical EchoVerse catalog proxy** at `/v1/echoverse/catalog`
+- protected byte-range audio proxy at `/v1/echoverse/audio/{track_id}` for Android/Media3 and future browser-native sessions
+- protected private artwork/file proxy at `/v1/echoverse/file/{path}`
 - browser shell sharing the same `/v1` + realtime contract intended for Android
 
-Live location is intentionally ephemeral: it exists only in the realtime room state and is not copied into room/member records or durable history.
+Live location is intentionally ephemeral: it exists only in realtime room state and is not copied into room/member records or durable history.
 
-The WebSocket token is sent only after the socket opens. It is never placed in the WebSocket URL, invite URL, query string, or logs by design.
+EchoVerse stays private upstream. The default server target is `http://echoverse-library-api:5304`; browsers receive only RydeSync `/v1/echoverse/*` URLs. The retired `echoverse-catalog:5300` service is not used.
+
+The current browser library UI intentionally browses the catalog without claiming browser audio playback is finished. Native clients can authorize range requests with the AV bearer flow today; browser `<audio>` cannot attach that bearer header, so browser playback waits for the stable AV Identity browser-session/cookie contract rather than placing identity credentials in media URLs.
+
+The WebSocket room token is sent only after the socket opens. It is never placed in the WebSocket URL, invite URL, query string, or logs by design.
 
 See `docs/ARCHITECTURE.md` and `docs/IDENTITY_INTEGRATION.md`.
+
+## Map provider note
+
+The map renderer itself has no mapping SDK dependency. It consumes a configurable `{z}/{x}/{y}` raster tile template. The `.env.example` defaults to OpenStreetMap tiles for development/light testing. A production deployment should use an AeroVista-approved tile service and preserve the configured attribution.
 
 ## Important deployment note
 
