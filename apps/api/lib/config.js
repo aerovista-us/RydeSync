@@ -48,17 +48,19 @@ export function loadConfig() {
     memberTokenTtlSeconds: intEnv('MEMBER_TOKEN_TTL_SECONDS', 28_800, { min: 60, max: 604_800 }),
     identity: Object.freeze({
       mode: identityMode(process.env.AV_IDENTITY_MODE),
+      // Legacy bearer-token verifier remains available for non-browser clients.
       baseUrl: (process.env.AV_IDENTITY_BASE_URL || '').replace(/\/$/, ''),
       verifyPath: process.env.AV_IDENTITY_VERIFY_PATH || '',
       timeoutMs: intEnv('AV_IDENTITY_TIMEOUT_MS', 2500, { min: 250, max: 15_000 }),
       appId: process.env.AV_IDENTITY_APP_ID || 'rydesync',
-      loginUrl: process.env.AV_ACCOUNT_LOGIN_URL || '',
-      handoffExchangeUrl: process.env.AV_HANDOFF_EXCHANGE_URL || '',
-      handoffAudience: process.env.AV_HANDOFF_AUDIENCE || 'rydesync',
-      handoffReturnParam: process.env.AV_HANDOFF_RETURN_PARAM || 'return_to',
-      handoffStateParam: process.env.AV_HANDOFF_STATE_PARAM || 'state',
-      handoffAudienceParam: process.env.AV_HANDOFF_AUDIENCE_PARAM || 'audience',
-      handoffCodeParam: process.env.AV_HANDOFF_CODE_PARAM || 'code',
+
+      // AeroCore App Adapter / Access Convergence v1. Parameter names are
+      // intentionally fixed by the platform contract rather than configurable
+      // per-app: client_id, return_to, state and code.
+      loginUrl: process.env.AV_ACCOUNT_LOGIN_URL || 'https://account.aerocoreos.com/login',
+      identityGatewayOrigin: (process.env.AV_IDENTITY_GATEWAY_ORIGIN || 'https://identity-api.aerovista.us').replace(/\/$/, ''),
+      serviceSecret: process.env.AV_IDENTITY_SERVICE_SECRET || '',
+      capabilitySnapshot: Object.freeze(csvEnv('AV_IDENTITY_CAPABILITIES', ['echoverse.library.listen'])),
       browserSessionTtlSeconds: intEnv('AV_BROWSER_SESSION_TTL_SECONDS', 900, { min: 60, max: 86400 })
     }),
     voice: Object.freeze({
