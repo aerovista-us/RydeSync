@@ -1,5 +1,6 @@
 import { HttpError } from './http.js';
 import { browserSessionFromRequest } from './browser-session.js';
+import { AeroCoreAdapterError, createRydeSyncAeroCoreAdapter } from './aerocore-app-adapter.js';
 
 export class IdentityContractError extends Error {
   constructor(message) {
@@ -107,6 +108,46 @@ export async function verifyWithAeroVista(token, config) {
   }
 }
 
+async function verifyBrowserAdapterSession(session, config) {
+  if (!session?.upstreamToken) return snapshotPrincipal(session);
+  if (!config.identity.identityGatewayOrigin || !config.identity.serviceSecret) {
+    throw new IdentityContractError('AeroCore App Adapter service identity is not configured');
+  }
+
+  const av = createRydeSyncAeroCoreAdapter(config);
+  let resolved;
+  try {
+    resolved = await av.auth.resolveSession(session.upstreamToken);
+  } catch (error) {
+    if (error instanceof AeroCoreAdapterError && [401, 403].includes(error.status)) {
+      throw new HttpError(401, 'identity_rejected', 'AeroVista Identity rejected this session');
+    }
+    throw error;
+  }
+
+  if (!resolved?.authenticated || typeof resolved.identityId !== 'string' || resolved.identityId.length < 4) {
+    throw new HttpError(401, 'identity_rejected', 'AeroVista Identity session is no longer authenticated');
+  }
+
+  const capabilities = [];
+  for (const capability of config.identity.capabilitySnapshot ?? []) {
+    const decision = await av.identity.can({ identityId: resolved.identityId, capability });
+    if (decision?.allowed === true) capabilities.push(capability);
+  }
+
+  return Object.freeze({
+    kind: 'member',
+    authenticated: true,
+    identityId: resolved.identityId,
+    displayName: session.principal?.displayName || null,
+    email: session.principal?.email || null,
+    capabilities: Object.freeze(capabilities),
+    capabilitiesFresh: true,
+    authState: 'adapter_session',
+    reason: null
+  });
+}
+
 export async function resolveIdentity(req, config) {
   const token = bearer(req);
   if (token) {
@@ -128,24 +169,17 @@ export async function resolveIdentity(req, config) {
   const browserSession = browserSessionFromRequest(req, config);
   if (!browserSession) return guest();
 
-  if (browserSession.upstreamToken) {
-    try {
-      return await verifyWithAeroVista(browserSession.upstreamToken, config);
-    } catch (error) {
-      if (error instanceof HttpError && error.status === 401) throw error;
-      if (config.identity.mode === 'required') {
-        throw new HttpError(503, 'identity_unavailable', 'AeroVista Identity is unavailable', {
-          cause: error?.name || 'IdentityError'
-        });
-      }
-      return guest('unavailable', error?.message || 'identity_unavailable');
+  try {
+    return await verifyBrowserAdapterSession(browserSession, config);
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 401) throw error;
+    if (config.identity.mode === 'required') {
+      throw new HttpError(503, 'identity_unavailable', 'AeroVista Identity is unavailable', {
+        cause: error?.name || 'IdentityError'
+      });
     }
+    return guest('unavailable', error?.message || 'identity_unavailable');
   }
-
-  // A successfully exchanged one-time handoff can establish local identity even if the
-  // upstream did not return a reusable verifier credential. Capability-gated actions
-  // still fail closed because this snapshot is explicitly marked non-fresh.
-  return snapshotPrincipal(browserSession) || guest();
 }
 
 export function requireIdentity(principal) {
