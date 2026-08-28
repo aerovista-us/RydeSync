@@ -22,4 +22,4 @@ jobs:
         with:
           node-version: '22'
       - name: Test RydeSync
-        run: npm test
+        run: timeout 60s npm test
