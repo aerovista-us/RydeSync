@@ -218,65 +218,41 @@ export function createApp(config = loadConfig()) {
       const filePath = path.join(webRoot, fileName);
       const content = await fs.readFile(filePath);
       const type = fileName.endsWith('.html') ? 'text/html; charset=utf-8'
-        : fileName.endsWith('.css') ? 'text/css; charset=utf-8'
-          : 'application/javascript; charset=utf-8';
-      res.writeHead(200, {
-        'content-type': type,
-        'cache-control': fileName === 'index.html' ? 'no-store' : 'public, max-age=300'
-      });
-      res.end(content);
-      return;
+        : fileName.endsWith('.js') ? 'text/javascript; charset=utf-8'
+          : 'text/css; charset=utf-8';
+      res.writeHead(200, { 'content-type': type, 'content-length': content.length, 'cache-control': 'no-cache' });
+      return res.end(content);
     }
 
     throw new HttpError(404, 'not_found', 'Route not found');
   }
 
   const server = http.createServer(async (req, res) => {
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('referrer-policy', 'same-origin');
+    res.setHeader('permissions-policy', 'geolocation=(self), microphone=(self), camera=()');
     try {
-      setSecurityHeaders(res, config);
       await route(req, res);
     } catch (error) {
-      handleError(res, error);
+      const status = error instanceof HttpError ? error.status : 500;
+      const code = error instanceof HttpError ? error.code : 'internal_error';
+      const message = error instanceof HttpError ? error.message : 'Unexpected server error';
+      if (!(error instanceof HttpError)) console.error(error);
+      json(res, status, { error: { code, message, details: error.details ?? null } });
     }
   });
-  realtimeHub = new RealtimeHub(server, rooms, config);
-  return { server, rooms, realtimeHub };
+  realtimeHub = new RealtimeHub({ server, rooms, config });
+  return server;
 }
 
-function setSecurityHeaders(res, config) {
-  const connectSources = ["'self'", 'https://tile.openstreetmap.org', 'https://*.tile.openstreetmap.org', 'stun:', 'turn:', 'turns:'];
-  try {
-    const echoverseOrigin = new URL(config.echoverse?.libraryApiUrl || '').origin;
-    if (echoverseOrigin && echoverseOrigin !== 'null') connectSources.push(echoverseOrigin);
-  } catch {}
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(self), microphone=(self), camera=()');
-  res.setHeader('Content-Security-Policy', [
-    "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
-    `connect-src ${connectSources.join(' ')}`,
-    "media-src 'self' blob:",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "frame-ancestors 'none'"
-  ].join('; '));
-}
-
-function handleError(res, error) {
-  const status = error instanceof HttpError ? error.status : 500;
-  const code = error instanceof HttpError ? error.code : 'internal_error';
-  const message = error instanceof HttpError ? error.message : 'Internal server error';
-  const details = error instanceof HttpError ? error.details : undefined;
-  json(res, status, { error: message, code, ...(details ? { details } : {}) });
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const config = loadConfig();
-  const { server } = createApp(config);
+  const server = createApp(config);
   server.listen(config.port, () => {
+    if (config.generatedDevSecret) {
+      console.warn('[rydesync] ROOM_TOKEN_SECRET was not set; using an ephemeral development secret.');
+    }
     console.log(`[rydesync] listening on ${config.publicBaseUrl}`);
+    console.log(`[rydesync] identity mode=${config.identity.mode} configured=${Boolean(config.identity.baseUrl && config.identity.verifyPath)}`);
   });
 }
