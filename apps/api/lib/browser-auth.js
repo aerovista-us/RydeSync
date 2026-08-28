@@ -5,10 +5,16 @@ import {
   authStateCookie,
   authStateFromRequest,
   browserSessionCookie,
+  browserSessionFromRequest,
   clearAuthStateCookie,
   clearBrowserSessionCookie,
   issueBrowserSession
 } from './browser-session.js';
+import {
+  AeroCoreAdapterError,
+  buildAccountLoginUrl,
+  createRydeSyncAeroCoreAdapter
+} from './aerocore-app-adapter.js';
 
 function redirect(res, location, headers = {}) {
   res.writeHead(302, { location, 'cache-control': 'no-store', ...headers });
@@ -35,7 +41,12 @@ function callbackUrl(config, next = '/') {
 }
 
 export function browserLoginConfigured(config) {
-  return Boolean(config.identity.loginUrl && config.identity.handoffExchangeUrl);
+  return Boolean(
+    config.identity.loginUrl
+    && config.identity.identityGatewayOrigin
+    && config.identity.serviceSecret
+    && config.identity.appId
+  );
 }
 
 export function beginBrowserLogin(res, config, url = null) {
@@ -44,85 +55,60 @@ export function beginBrowserLogin(res, config, url = null) {
   }
   const state = crypto.randomBytes(24).toString('base64url');
   const next = safeNext(url?.searchParams?.get('next') || '/', config);
-  const login = new URL(config.identity.loginUrl);
-  login.searchParams.set(config.identity.handoffReturnParam, callbackUrl(config, next));
-  login.searchParams.set(config.identity.handoffStateParam, state);
-  if (config.identity.handoffAudienceParam && config.identity.handoffAudience) {
-    login.searchParams.set(config.identity.handoffAudienceParam, config.identity.handoffAudience);
-  }
-  return redirect(res, login.toString(), { 'set-cookie': authStateCookie(state, config) });
+  const login = buildAccountLoginUrl({
+    appId: config.identity.appId,
+    loginUrl: config.identity.loginUrl,
+    returnTo: callbackUrl(config, next),
+    state
+  });
+  return redirect(res, login, { 'set-cookie': authStateCookie(state, config) });
 }
 
-function extractPrincipalPayload(body) {
-  if (!body || typeof body !== 'object') return body;
-  if (body.principal && typeof body.principal === 'object') return body.principal;
-  if (body.identity && typeof body.identity === 'object') {
-    return {
-      ...body,
-      identity: body.identity,
-      identity_id: body.identity_id ?? body.identityId ?? body.identity.id
-    };
+function mapAdapterFailure(error) {
+  if (error instanceof AeroCoreAdapterError) {
+    if ([400, 401, 403, 409, 410].includes(error.status)) {
+      return new HttpError(401, 'handoff_rejected', 'AeroVista rejected or expired this one-time sign-in handoff');
+    }
+    return new HttpError(503, 'handoff_unavailable', `AeroVista handoff exchange returned HTTP ${error.status}`);
   }
-  return body;
-}
-
-function extractUpstreamToken(body) {
-  for (const value of [body?.session_token, body?.sessionToken, body?.access_token, body?.accessToken, body?.token]) {
-    if (typeof value === 'string' && value.length >= 12) return value;
+  if (error?.name === 'AbortError') {
+    return new HttpError(503, 'handoff_unavailable', 'AeroVista sign-in handoff timed out');
   }
-  return null;
+  return new HttpError(503, 'handoff_unavailable', 'AeroVista sign-in handoff is temporarily unavailable');
 }
 
 export async function completeBrowserLogin(req, res, url, config) {
   if (!browserLoginConfigured(config)) {
     throw new HttpError(503, 'login_not_configured', 'AeroVista sign-in handoff is not configured for RydeSync');
   }
-  const state = url.searchParams.get(config.identity.handoffStateParam);
+  const state = url.searchParams.get('state');
   const expectedState = authStateFromRequest(req);
   if (!state || !expectedState || state !== expectedState) {
     throw new HttpError(400, 'invalid_auth_state', 'AeroVista sign-in state did not match this browser session');
   }
-  const code = url.searchParams.get(config.identity.handoffCodeParam);
+  const code = url.searchParams.get('code');
   if (!code) throw new HttpError(400, 'missing_handoff_code', 'AeroVista sign-in did not return a handoff code');
 
   const next = safeNext(url.searchParams.get('next') || '/', config);
-  const redirectUri = callbackUrl(config, next);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.identity.timeoutMs);
-  let response;
+  let exchanged;
+  let resolved;
   try {
-    response = await fetch(config.identity.handoffExchangeUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'x-aerovista-app': config.identity.appId
-      },
-      body: JSON.stringify({
-        code,
-        state,
-        audience: config.identity.handoffAudience,
-        redirect_uri: redirectUri
-      }),
-      signal: controller.signal
-    });
+    const av = createRydeSyncAeroCoreAdapter(config);
+    exchanged = await av.auth.exchangeHandoff(code);
+    if (typeof exchanged?.sessionToken !== 'string' || exchanged.sessionToken.length < 12) {
+      throw new Error('AeroCore handoff response did not include sessionToken');
+    }
+    resolved = await av.auth.resolveSession(exchanged.sessionToken);
   } catch (error) {
-    const timedOut = error?.name === 'AbortError';
-    throw new HttpError(503, 'handoff_unavailable', timedOut
-      ? 'AeroVista sign-in handoff timed out'
-      : 'AeroVista sign-in handoff is temporarily unavailable');
-  } finally {
-    clearTimeout(timeout);
+    throw mapAdapterFailure(error);
   }
 
-  if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 410) {
-    throw new HttpError(401, 'handoff_rejected', 'AeroVista rejected or expired this one-time sign-in handoff');
+  if (!resolved?.authenticated || typeof resolved.identityId !== 'string' || resolved.identityId.length < 4) {
+    throw new HttpError(401, 'handoff_rejected', 'AeroVista did not resolve an authenticated identity for this handoff');
   }
-  if (!response.ok) throw new HttpError(503, 'handoff_unavailable', `AeroVista handoff exchange returned HTTP ${response.status}`);
 
-  const body = await response.json();
-  const principal = mapAvIdentityPayload(extractPrincipalPayload(body));
-  const session = issueBrowserSession({ principal, upstreamToken: extractUpstreamToken(body) }, config);
+  const principal = mapAvIdentityPayload({ identity_id: resolved.identityId });
+  const session = issueBrowserSession({ principal, upstreamToken: exchanged.sessionToken }, config);
   const destination = new URL(next, config.publicBaseUrl);
   destination.searchParams.set('signed_in', '1');
   return redirect(res, `${destination.pathname}${destination.search}`, {
@@ -130,6 +116,15 @@ export async function completeBrowserLogin(req, res, url, config) {
   });
 }
 
-export function browserLogout(res, config) {
+export async function browserLogout(req, res, config) {
+  const session = browserSessionFromRequest(req, config);
+  if (session?.upstreamToken && browserLoginConfigured(config)) {
+    try {
+      const av = createRydeSyncAeroCoreAdapter(config);
+      await av.auth.revokeSession(session.upstreamToken);
+    } catch {
+      // Local logout must remain available even if Identity is unreachable.
+    }
+  }
   return redirect(res, '/', { 'set-cookie': [clearBrowserSessionCookie(config), clearAuthStateCookie(config)] });
 }
