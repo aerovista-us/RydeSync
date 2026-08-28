@@ -5,6 +5,7 @@ import {
   authStateCookie,
   authStateFromRequest,
   browserSessionCookie,
+  browserSessionFromRequest,
   clearAuthStateCookie,
   clearBrowserSessionCookie,
   issueBrowserSession
@@ -115,6 +116,16 @@ export async function completeBrowserLogin(req, res, url, config) {
   });
 }
 
-export function browserLogout(res, config) {
+export async function browserLogout(req, res, config) {
+  const session = browserSessionFromRequest(req, config);
+  if (session?.upstreamToken && browserLoginConfigured(config)) {
+    try {
+      const av = createRydeSyncAeroCoreAdapter(config);
+      await av.auth.revokeSession(session.upstreamToken);
+    } catch {
+      // Logout must always clear the local browser session even when the
+      // shared Identity service is temporarily unreachable.
+    }
+  }
   return redirect(res, '/', { 'set-cookie': [clearBrowserSessionCookie(config), clearAuthStateCookie(config)] });
 }
