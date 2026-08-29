@@ -23,3 +23,7 @@ jobs:
           node-version: '22'
       - name: Test RydeSync
         run: timeout 60s npm test
+      - name: Validate production compose
+        env:
+          RYDESYNC_ENV_FILE: .env.example
+        run: docker compose config >/dev/null
