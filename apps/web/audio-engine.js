@@ -1,4 +1,4 @@
-import { driftCorrection, playbackTargetMs } from '/sync-core.js';
+import { driftCorrection, playbackTargetMs } from './sync-core.js';
 
 export class SharedAudioEngine {
   constructor(audio, { softDriftMs = 250, hardDriftMs = 1500, onState = () => {} } = {}) {
@@ -109,6 +109,12 @@ export class SharedAudioEngine {
         await this.audio.play();
         this.emit('playing', { driftMs: correction.driftMs ?? 0, correction: correction.action });
       } catch (error) {
+        // Media authorization/loading can outlive the transient browser user
+        // activation that began "Listen with crew". Keep the prepared source
+        // and pending room state, but return to an unarmed state so the next
+        // Listen click is a fresh browser-approved gesture instead of being
+        // interpreted as "Stop listening".
+        this.armed = false;
         this.emit('gesture_required', { error: error?.name || 'play_blocked' });
       }
     } else {
