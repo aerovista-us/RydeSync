@@ -21,7 +21,7 @@ export function filterAndSortTracks(tracks, { query = '', artist = '', album = '
   });
 
   const key = ['artist', 'album'].includes(sort) ? sort : 'title';
-  return filtered.toSorted((a, b) => {
+  return filtered.slice().sort((a, b) => {
     const primary = text(a?.[key]).localeCompare(text(b?.[key]), undefined, { sensitivity: 'base', numeric: true });
     if (primary) return primary;
     return text(a?.title).localeCompare(text(b?.title), undefined, { sensitivity: 'base', numeric: true });
