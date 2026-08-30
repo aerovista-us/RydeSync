@@ -9,10 +9,12 @@ test('shared audio target advances only while room playback is playing', () => {
   assert.equal(playbackTargetMs({ ...state, status: 'paused' }, Date.parse('2026-08-28T00:00:02.500Z')), 1000);
 });
 
-test('drift policy prefers gentle rate correction before hard seek', () => {
+test('drift policy corrects medium drift faster and hard-seeks large drift', () => {
   assert.equal(driftCorrection({ currentPositionMs: 1000, targetPositionMs: 1100 }).action, 'none');
-  assert.equal(driftCorrection({ currentPositionMs: 1000, targetPositionMs: 1600 }).action, 'rate');
-  assert.equal(driftCorrection({ currentPositionMs: 1000, targetPositionMs: 3000 }).action, 'seek');
+  assert.deepEqual(driftCorrection({ currentPositionMs: 1000, targetPositionMs: 1400 }), {
+    action: 'rate', playbackRate: 1.05, driftMs: 400
+  });
+  assert.equal(driftCorrection({ currentPositionMs: 1000, targetPositionMs: 1800 }).action, 'seek');
 });
 
 class FakeAudio {
@@ -27,6 +29,7 @@ class FakeAudio {
     this.pauseCalls = 0;
     this.rejectNextPlay = true;
     this.listeners = new Map();
+    this.onLoad = null;
   }
 
   addEventListener(type, listener) {
@@ -38,7 +41,9 @@ class FakeAudio {
     this.listeners.get(type)?.delete(listener);
   }
 
-  load() {}
+  load() {
+    this.onLoad?.();
+  }
 
   pause() {
     this.pauseCalls += 1;
@@ -58,6 +63,27 @@ class FakeAudio {
     }
   }
 }
+
+test('protected stream startup advances target across metadata load delay', async () => {
+  let nowMs = 10_000;
+  const audio = new FakeAudio();
+  audio.rejectNextPlay = false;
+  audio.onLoad = () => { nowMs += 600; };
+  const engine = new SharedAudioEngine(audio, { now: () => nowMs });
+  const playback = {
+    trackId: 'track-load-delay',
+    status: 'playing',
+    positionMs: 0,
+    anchorServerTs: '2026-08-28T00:00:00.000Z'
+  };
+  const serverNow = Date.parse('2026-08-28T00:00:01.000Z');
+
+  engine.setArmed(true);
+  await engine.apply(playback, serverNow, { force: true });
+
+  assert.equal(audio.currentTime, 1.6);
+  assert.equal(audio.playCalls, 1);
+});
 
 test('autoplay rejection returns engine to Listen state while preserving prepared media for retry', async () => {
   const audio = new FakeAudio();
