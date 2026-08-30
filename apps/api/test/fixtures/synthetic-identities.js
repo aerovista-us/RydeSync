@@ -48,6 +48,13 @@ export const SYNTHETIC_IDENTITIES = Object.freeze({
     accountClass: 'member',
     capabilities: Object.freeze(['echoverse.library.listen'])
   }),
+  stale01: Object.freeze({
+    token: 'synthetic-stale01',
+    identityId: 'avi_test_stale01',
+    displayName: 'Synthetic Stale Authorization 01',
+    accountClass: 'member',
+    capabilities: Object.freeze(['echoverse.library.listen'])
+  }),
   expired01: Object.freeze({
     token: 'synthetic-expired01',
     identityId: 'avi_test_expired01',
