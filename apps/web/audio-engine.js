@@ -33,8 +33,10 @@ export class SharedAudioEngine {
       this.audio.playbackRate = 1;
       this.emit('muted');
     } else {
+      // The UI explicitly calls apply() after opening/refreshing the media grant.
+      // Do not also auto-apply pending state here: that creates two concurrent
+      // play attempts on the same user gesture and makes autoplay retry noisier.
       this.emit('ready');
-      if (this.pendingPlayback) this.apply(this.pendingPlayback.playback, this.pendingPlayback.serverNowMs, { force: true });
     }
   }
 
