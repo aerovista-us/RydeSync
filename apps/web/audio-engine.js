@@ -1,10 +1,11 @@
 import { driftCorrection, playbackTargetMs } from './sync-core.js';
 
 export class SharedAudioEngine {
-  constructor(audio, { softDriftMs = 250, hardDriftMs = 1500, onState = () => {} } = {}) {
+  constructor(audio, { softDriftMs = 150, hardDriftMs = 750, now = () => Date.now(), onState = () => {} } = {}) {
     this.audio = audio;
     this.softDriftMs = softDriftMs;
     this.hardDriftMs = hardDriftMs;
+    this.now = now;
     this.onState = onState;
     this.armed = false;
     this.currentTrackId = null;
@@ -75,15 +76,22 @@ export class SharedAudioEngine {
       return;
     }
 
-    const targetMs = playbackTargetMs(playback, serverNowMs);
+    const applyStartedAt = this.now();
+    const initialTargetMs = playbackTargetMs(playback, serverNowMs);
     try {
-      await this.ensureTrack(playback.trackId, targetMs);
+      await this.ensureTrack(playback.trackId, initialTargetMs);
     } catch (error) {
       this.lastError = error.message;
       this.emit('error', { error: error.message });
       return;
     }
 
+    // Loading a protected stream can take hundreds of milliseconds on a phone.
+    // Advance the server-time estimate by that local elapsed time so new riders
+    // do not begin playback at the position that was correct before metadata and
+    // buffering completed.
+    const loadElapsedMs = Math.max(0, this.now() - applyStartedAt);
+    const targetMs = playbackTargetMs(playback, Number(serverNowMs) + loadElapsedMs);
     const currentMs = this.audio.currentTime * 1000;
     const correction = driftCorrection({
       currentPositionMs: currentMs,
@@ -99,7 +107,7 @@ export class SharedAudioEngine {
     } else if (correction.action === 'rate') {
       this.audio.playbackRate = correction.playbackRate;
       clearTimeout(this.rateResetTimer);
-      this.rateResetTimer = setTimeout(() => { this.audio.playbackRate = 1; }, 3500);
+      this.rateResetTimer = setTimeout(() => { this.audio.playbackRate = 1; }, 3000);
     } else {
       this.audio.playbackRate = 1;
     }
