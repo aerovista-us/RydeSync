@@ -1,89 +1,109 @@
 # AeroVista Identity Integration Contract
 
-## Alpha.7 status
+## Current Alpha.7 contract
 
-RydeSync now has a complete **relying-party integration boundary**, but the exact production Access Convergence exchange endpoint remains deployment configuration rather than a guessed path.
+RydeSync is a relying party of the AeroVista Account + Identity/AVCC control plane.
 
-The product rule is:
+> **Account proves identity. Identity/AVCC grants capability. RydeSync enforces capability. Room role grants room authority.**
 
-```text
-Guest                     Signed-in AeroVista member
-  |                                 |
-  +-- Join Ryde                     +-- Start Ryde
-  +-- room PTT when allowed         +-- Join Ryde
-  +-- opt-in location               +-- member identity
-  +-- hear current shared track     +-- host/co-host music control by room role
-                                    +-- EchoVerse library only with live AVCC grant
-```
+The exact production broker routes are now known and must not be replaced with guessed configuration.
 
-Authentication establishes identity. Authorization remains live/server-enforced. Room role establishes room authority.
-
-## Proven handoff shape
-
-RydeSync follows the AeroVista Access Convergence pattern:
+## Current flow
 
 ```text
-rydesync.aerovista.us
-       |
-       | /auth/login
-       v
-account.aerocoreos.com/login
-       |
-       | Firebase authenticates user
-       | AeroVista/AVCC establishes canonical identity
-       v
-short-lived, one-time, audience-bound handoff code
-       |
-       | redirect back; code + state only
-       v
-RydeSync /auth/callback
-       |
-       | SERVER-SIDE exchange through Access Convergence
-       v
-local encrypted HttpOnly __session
+RydeSync /auth/login
+  -> account.aerocoreos.com/login
+  -> identity proof (public Account or staff SSO resume)
+  -> short-lived one-time client/audience-bound handoff code + state
+  -> RydeSync /auth/callback
+  -> validate state
+  -> SERVER-SIDE HMAC POST identity-api.aerovista.us/v1/handoff/exchange
+  -> encrypted HttpOnly __session
 ```
 
-Never put Firebase ID tokens, AVCC session tokens, service credentials or EchoVerse credentials into redirect URLs.
+Current adapter broker calls:
 
-## Required production configuration
+```text
+POST /v1/handoff/exchange
+POST /v1/session/resolve
+POST /v1/session/revoke
+POST /v1/authorization/check
+```
+
+Canonical service source:
+
+```text
+aerovista-us/ACOS
+branch: main
+path: services/identity-gateway
+live path: /srv/ACOS/services/identity-gateway
+origin: https://identity-api.aerovista.us
+```
+
+The standalone `aerovista-us/identity-gateway` repository is an extracted/reference/regression harness and is **not** production source of truth.
+
+## Configuration
 
 ```env
 AV_IDENTITY_MODE=optional
 AV_IDENTITY_APP_ID=rydesync
 AV_ACCOUNT_LOGIN_URL=https://account.aerocoreos.com/login
-AV_HANDOFF_EXCHANGE_URL=<exact proven relying-party exchange endpoint>
-AV_HANDOFF_AUDIENCE=rydesync
-AV_HANDOFF_RETURN_PARAM=return_to
-AV_HANDOFF_STATE_PARAM=state
-AV_HANDOFF_AUDIENCE_PARAM=audience
-AV_HANDOFF_CODE_PARAM=code
+AV_IDENTITY_GATEWAY_ORIGIN=https://identity-api.aerovista.us
+AV_IDENTITY_SERVICE_SECRET=<server-only HMAC secret>
 AV_BROWSER_SESSION_TTL_SECONDS=900
 ```
 
-The exchange URL must come from the actual deployed AeroVista relying-party implementation. The source material proves the handoff architecture and `__session` cookie requirement, but it does not identify the exact production endpoint path, so RydeSync intentionally does not invent one.
+Older `AV_HANDOFF_EXCHANGE_URL=<exact endpoint>` instructions are retired. The app adapter owns the broker paths.
 
-## Optional live bearer verification adapter
+## Server HMAC
 
-RydeSync can also verify a bearer/session verifier through:
-
-```env
-AV_IDENTITY_BASE_URL=
-AV_IDENTITY_VERIFY_PATH=
-AV_IDENTITY_TIMEOUT_MS=2500
+```text
+METHOD\nPATH_WITH_QUERY\nTIMESTAMP\nRAW_BODY
 ```
 
-Resolution order is:
+Headers:
 
-1. explicit Bearer token, if present;
-2. local encrypted `__session` from the handoff.
+```text
+X-AV-Service
+X-AV-Timestamp
+X-AV-Signature
+```
 
-If the local handoff session contains a reusable verifier credential, RydeSync live-verifies through AeroVista Identity for capability-gated actions. If it contains only a canonical principal snapshot, identity-only actions (such as hosting) may continue for the local session, but capability checks remain **fail closed** because the capability set is not considered fresh.
+The browser never receives the service secret.
+
+## Public and staff identity lanes
+
+Public/customer Account uses Firebase/Google/password identity proof through `account.aerocoreos.com`.
+
+Staff/member SSO uses:
+
+```text
+login.aerocoreos.com
+  -> Cloudflare Access
+  -> Authentik
+  -> AVCC
+  -> resume Account/app handoff preserving client_id, return_to and state
+```
+
+This does not convert staff into a second public-account identity. It resumes the same app relying-party handoff after staff identity converges.
+
+## Capability behavior
+
+`echoverse.library.listen` is a live explicit AVCC capability. It is not inferred from `staff`, `member`, plan, room ownership, or a prior capability snapshot.
+
+```text
+allow       -> protected operation proceeds
+deny        -> 403
+unavailable -> 503 fail closed
+```
+
+A locally encrypted app session may establish authenticated identity, but capability-sensitive actions must use a fresh authority decision. Live revocation is expected to be visible without restarting RydeSync.
 
 ## Runtime modes
 
-- `off`: do not attempt AeroVista identity. Guest joining remains available; member hosting/library paths are unavailable.
-- `optional`: recommended during rollout. Identity outage degrades guest-capable surfaces to guest, while protected actions still deny.
-- `required`: identity verification outages return `503 identity_unavailable` instead of guest continuation.
+- `off`: guest-capable surfaces only; protected member functions unavailable.
+- `optional`: public guest flow remains usable during Identity outages while protected actions fail closed. Current rollout mode.
+- `required`: Identity failure prevents identity-dependent use and returns unavailable rather than silently continuing.
 
 ## Normalized principal
 
@@ -100,31 +120,38 @@ If the local handoff session contains a reusable verifier credential, RydeSync l
 }
 ```
 
-Production should ultimately converge the permissive field mapping onto one exact Identity Gateway response contract.
+The room domain consumes this normalized concept; it does not depend directly on Firebase/AVCC response internals.
 
 ## Security invariants
 
-- A token is not trusted merely because it exists.
-- A malformed/rejected Identity response never becomes a member principal.
-- Cross-domain callback state must match the browser's HttpOnly state cookie.
-- Handoff exchange occurs server-side.
-- Handoff network/timeout failure returns `503 handoff_unavailable` and does not create a session.
-- `Start Ryde` requires authenticated identity server-side; hiding the UI alone is not sufficient.
-- Shared playback mutation requires both authenticated identity and host/co-host role.
-- EchoVerse library browse requires a fresh explicit `echoverse.library.listen` capability.
-- Guest shared listening is **not** library entitlement. Its media cookie is bound to room + member + current track and is rechecked against live room playback at audio request time.
-- No Firebase service credential, AVCC service credential, EchoVerse upstream credential or long-lived identity token belongs in browser-visible URLs or the APK.
+1. No Firebase token, AVCC token, service secret or reusable identity credential in redirect/media URLs.
+2. Callback state must match the browser's HttpOnly state value.
+3. Handoff exchange is server-side and service-authenticated.
+4. Rejected/expired/unknown supplied credentials never silently downgrade to a guest credential.
+5. `Start Ryde` is authenticated server-side, not merely hidden in UI.
+6. EchoVerse library browse requires a fresh explicit capability.
+7. Shared playback mutation additionally requires host/co-host room role.
+8. Guest listening is a room/current-track media grant, never an inherited library entitlement.
+9. Service credentials remain server-only and out of Android/browser bundles.
 
-## Production acceptance gate
+## Current acceptance evidence
 
-Before declaring AeroVista sign-in live on RydeSync:
+RydeSync synthetic suite: **69/69 passing**.
 
-1. identify the exact existing Access Convergence issue/consume exchange path on NXCore;
-2. set `AV_HANDOFF_EXCHANGE_URL` and account login URL;
-3. sign in using a real AeroVista account;
-4. verify callback mints `__session` and redirects back without any auth token in the URL;
-5. confirm guest still sees only Join Ryde + Sign In;
-6. confirm signed-in member sees Start Ryde;
-7. confirm sign-out removes Start Ryde again;
-8. prove library allow/deny follows live AVCC grant state;
-9. prove revocation denies protected library access without granting a guest broader access.
+The semantic identity matrix proves:
+
+- `staff01` allow / `staff02` deny;
+- `member01` allow / `member02` deny;
+- guest create/join boundaries;
+- live `revoked01` capability convergence;
+- stale authorization fail closed;
+- expired/unknown supplied credentials rejected.
+
+The canonical ACOS Identity Gateway has dedicated broker/session/handoff tests. The standalone extracted Identity Gateway harness additionally passes 10/10 on Node 20 and 10/10 on Node 22. `member-access` carries the same semantic matrix through signed Cloudflare Access JWT/JWKS and AVCC HMAC resolution.
+
+See:
+
+- `IDENTITY_STACK_SCHEMATIC.md`
+- `AEROCORE_APP_ADAPTER_SCHEMATIC.md`
+- `SOURCE_AND_PRODUCTION_MAP.md`
+- `SYNTHETIC_IDENTITY_ACCEPTANCE_MATRIX.md`
