@@ -1,0 +1,46 @@
+name: Alpha7 Public Smoke Temp
+
+on:
+  pull_request:
+    branches:
+      - upgrade/alpha7-global-foundation
+
+permissions:
+  contents: read
+
+jobs:
+  public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify public health and bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://rydesync.aerovista.us'
+
+          health="$(curl --fail --silent --show-error --retry 3 --retry-delay 2 "$base/health")"
+          bootstrap="$(curl --fail --silent --show-error --retry 3 --retry-delay 2 "$base/v1/bootstrap")"
+          root="$(curl --fail --silent --show-error --retry 3 --retry-delay 2 "$base/")"
+
+          printf '%s' "$health" | jq -e '.ok == true and .service == "rydesync" and .version == "3.0.0-alpha.7"' >/dev/null
+          printf '%s' "$bootstrap" | jq -e '
+            .service == "rydesync" and
+            .version == "3.0.0-alpha.7" and
+            .identity.loginConfigured == true and
+            .identity.loginPath == "/auth/login" and
+            .features.echoverseEntitlementGate == true and
+            .features.pushToTalk == true and
+            .features.turnReady == false and
+            .voice.enabled == true and
+            .voice.turnConfigured == false and
+            (.voice.iceServers | length) >= 1
+          ' >/dev/null
+
+          grep -q 'RydeSync' <<<"$root"
+          grep -qi 'EchoVerse' <<<"$root"
+
+          echo "PUBLIC_HEALTH_OK"
+          echo "PUBLIC_BOOTSTRAP_OK"
+          echo "PUBLIC_ROOT_OK"
+          printf '%s' "$bootstrap" | jq '{version, identity, features: {echoverseEntitlementGate: .features.echoverseEntitlementGate, pushToTalk: .features.pushToTalk, turnReady: .features.turnReady}, voice: {enabled: .voice.enabled, turnConfigured: .voice.turnConfigured, iceServers: .voice.iceServers}}'
