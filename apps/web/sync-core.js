@@ -7,7 +7,7 @@ export function playbackTargetMs(playback, serverNowMs) {
   return Math.max(0, base + Math.max(0, serverNowMs - anchor));
 }
 
-export function driftCorrection({ currentPositionMs, targetPositionMs, softDriftMs = 250, hardDriftMs = 1500, status = 'playing' }) {
+export function driftCorrection({ currentPositionMs, targetPositionMs, softDriftMs = 150, hardDriftMs = 750, status = 'playing' }) {
   const current = Number(currentPositionMs);
   const target = Number(targetPositionMs);
   if (!Number.isFinite(current) || !Number.isFinite(target)) return { action: 'seek', seekToMs: Math.max(0, target || 0), playbackRate: 1 };
@@ -20,6 +20,6 @@ export function driftCorrection({ currentPositionMs, targetPositionMs, softDrift
       : { action: 'none', playbackRate: 1, driftMs };
   }
   if (abs >= hardDriftMs) return { action: 'seek', seekToMs: Math.max(0, target), playbackRate: 1, driftMs };
-  if (abs >= softDriftMs) return { action: 'rate', playbackRate: driftMs > 0 ? 1.03 : 0.97, driftMs };
+  if (abs >= softDriftMs) return { action: 'rate', playbackRate: driftMs > 0 ? 1.05 : 0.95, driftMs };
   return { action: 'none', playbackRate: 1, driftMs };
 }

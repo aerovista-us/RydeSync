@@ -1,10 +1,11 @@
-import { driftCorrection, playbackTargetMs } from '/sync-core.js';
+import { driftCorrection, playbackTargetMs } from './sync-core.js';
 
 export class SharedAudioEngine {
-  constructor(audio, { softDriftMs = 250, hardDriftMs = 1500, onState = () => {} } = {}) {
+  constructor(audio, { softDriftMs = 150, hardDriftMs = 750, now = () => Date.now(), onState = () => {} } = {}) {
     this.audio = audio;
     this.softDriftMs = softDriftMs;
     this.hardDriftMs = hardDriftMs;
+    this.now = now;
     this.onState = onState;
     this.armed = false;
     this.currentTrackId = null;
@@ -32,8 +33,10 @@ export class SharedAudioEngine {
       this.audio.playbackRate = 1;
       this.emit('muted');
     } else {
+      // The UI explicitly calls apply() after opening/refreshing the media grant.
+      // Do not also auto-apply pending state here: that creates two concurrent
+      // play attempts on the same user gesture and makes autoplay retry noisier.
       this.emit('ready');
-      if (this.pendingPlayback) this.apply(this.pendingPlayback.playback, this.pendingPlayback.serverNowMs, { force: true });
     }
   }
 
@@ -75,15 +78,22 @@ export class SharedAudioEngine {
       return;
     }
 
-    const targetMs = playbackTargetMs(playback, serverNowMs);
+    const applyStartedAt = this.now();
+    const initialTargetMs = playbackTargetMs(playback, serverNowMs);
     try {
-      await this.ensureTrack(playback.trackId, targetMs);
+      await this.ensureTrack(playback.trackId, initialTargetMs);
     } catch (error) {
       this.lastError = error.message;
       this.emit('error', { error: error.message });
       return;
     }
 
+    // Loading a protected stream can take hundreds of milliseconds on a phone.
+    // Advance the server-time estimate by that local elapsed time so new riders
+    // do not begin playback at the position that was correct before metadata and
+    // buffering completed.
+    const loadElapsedMs = Math.max(0, this.now() - applyStartedAt);
+    const targetMs = playbackTargetMs(playback, Number(serverNowMs) + loadElapsedMs);
     const currentMs = this.audio.currentTime * 1000;
     const correction = driftCorrection({
       currentPositionMs: currentMs,
@@ -99,7 +109,7 @@ export class SharedAudioEngine {
     } else if (correction.action === 'rate') {
       this.audio.playbackRate = correction.playbackRate;
       clearTimeout(this.rateResetTimer);
-      this.rateResetTimer = setTimeout(() => { this.audio.playbackRate = 1; }, 3500);
+      this.rateResetTimer = setTimeout(() => { this.audio.playbackRate = 1; }, 3000);
     } else {
       this.audio.playbackRate = 1;
     }
@@ -109,6 +119,12 @@ export class SharedAudioEngine {
         await this.audio.play();
         this.emit('playing', { driftMs: correction.driftMs ?? 0, correction: correction.action });
       } catch (error) {
+        // Media authorization/loading can outlive the transient browser user
+        // activation that began "Listen with crew". Keep the prepared source
+        // and pending room state, but return to an unarmed state so the next
+        // Listen click is a fresh browser-approved gesture instead of being
+        // interpreted as "Stop listening".
+        this.armed = false;
         this.emit('gesture_required', { error: error?.name || 'play_blocked' });
       }
     } else {
