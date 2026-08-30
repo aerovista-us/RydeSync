@@ -1,136 +1,121 @@
-# Alpha.7 NXCore Deployment Checklist
+# Alpha.7 NXCore Deployment / Reconciliation Checklist
 
-Target source path:
+This document distinguishes **repository synchronization** from **production deployment**.
+
+## Canonical locations
 
 ```text
-/srv/NXDrive/EchoVerse/rydesync-global-foundation
+RydeSync repo:          aerovista-us/RydeSync
+Production source:      /srv/NXDrive/EchoVerse/rydesync-global-foundation
+Public URL:             https://rydesync.aerovista.us
+Prod host bind:         127.0.0.1:8080 -> container :9000
+Runtime env:            /etc/acos-secrets/rydesync.env
+Canonical Identity:     aerovista-us/ACOS/main/services/identity-gateway
+Identity live path:     /srv/ACOS/services/identity-gateway
+Identity origin:        https://identity-api.aerovista.us
+Deployment orchestration: aerovista-us/nxcore branch master
 ```
 
-Alpha.7 is intended as a copy-replace upgrade over the alpha.6 foundation already field-tested for live location.
+Current controlled Alpha.7 stack pins in NXCore:
 
-## 1. Preserve deployment secrets/config
-
-Before replacing files:
-
-```bash
-cd /srv/NXDrive/EchoVerse/rydesync-global-foundation
-cp .env /tmp/rydesync-alpha6.env.backup
+```text
+Identity Gateway ACOS SHA: 411e5f56426da8ded41b6b4d902dc2676e4e7f67
+RydeSync release SHA:      1be4b5e33c77c32014b1f9963315a3219f45d778
 ```
 
-Do not regenerate `ROOM_TOKEN_SECRET` during a routine upgrade.
+Post-release RydeSync changes before this documentation reconciliation are acceptance tests/docs; do not bump production pins just to follow documentation commits.
 
-## 2. Copy alpha.7 source
-
-Replace the application files, but preserve the production `.env`. Then:
+## Automated gate
 
 ```bash
-cd /srv/NXDrive/EchoVerse/rydesync-global-foundation
-node -p "require('./package.json').version"
 npm test
 ```
 
-Expected version: `3.0.0-alpha.7`.
+Expected current Alpha.7 result: **69/69 passing**. The PR workflow also validates the production Docker Compose configuration.
 
-Expected automated result for this package: `60/60` passing.
-
-## 3. Add alpha.7 environment values
-
-Merge these into the existing production `.env`:
+## Required production environment shape
 
 ```env
 AV_IDENTITY_MODE=optional
 AV_IDENTITY_APP_ID=rydesync
 AV_ACCOUNT_LOGIN_URL=https://account.aerocoreos.com/login
-AV_HANDOFF_EXCHANGE_URL=<EXACT PROVEN ACCESS CONVERGENCE EXCHANGE ENDPOINT>
-AV_HANDOFF_AUDIENCE=rydesync
+AV_IDENTITY_GATEWAY_ORIGIN=https://identity-api.aerovista.us
+AV_IDENTITY_SERVICE_SECRET=<server-only secret>
 AV_BROWSER_SESSION_TTL_SECONDS=900
 
 VOICE_ENABLED=true
 VOICE_MAX_PEERS=12
 STUN_URLS=stun:stun.l.google.com:19302
-TURN_URLS=<production TURN urls>
-TURN_USERNAME=<production TURN username>
-TURN_CREDENTIAL=<production TURN credential>
+TURN_URLS=
+TURN_USERNAME=
+TURN_CREDENTIAL=
 ```
 
-Do not guess `AV_HANDOFF_EXCHANGE_URL`. If the exact deployed path has not been located yet, leave it blank. The UI will keep guest joining live and report sign-in as not configured instead of sending users into a broken auth loop.
+The old `AV_HANDOFF_EXCHANGE_URL=<guess>` step is retired. Broker path mapping is owned by the app adapter (`/v1/handoff/exchange`, session resolve/revoke, authorization check).
 
-If TURN is not ready yet, voice can still be deployed for LAN/easy-NAT testing with the TURN fields blank, but the UI will explicitly warn that cellular fallback is not configured.
+## Deployment procedure
 
-## 4. Inspect the current container before replacement
+Prefer the NXCore operational tooling rather than hand-recreating the runtime:
 
-```bash
-docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}' | grep -i rydesync
+```text
+/srv/core
+repo: aerovista-us/nxcore
+branch: master
+ops/tools/deploy-rydesync-alpha7-stack.sh
 ```
 
-Record the current container name, port mapping, network, restart policy and env-file path before changing it:
+The stack script sequences secret provisioning, canonical ACOS Identity Gateway deployment, RydeSync deployment and acceptance. `ops/tools/deploy-identity-gateway.sh` deploys from the ACOS subtree; the standalone `aerovista-us/identity-gateway` repo is not a production deploy source.
 
-```bash
-docker inspect <CURRENT_RYDESYNC_CONTAINER> > /tmp/rydesync-before-alpha7.json
+Before any new runtime release:
+
+1. preserve `ROOM_TOKEN_SECRET` and existing production env;
+2. record existing container/image/ports/network;
+3. verify the candidate source SHA and tests;
+4. ensure RydeSync can resolve `echoverse-library-api:5304` on the required Docker network;
+5. build/tag an intentional new image;
+6. perform controlled replace using the proven bind/network/restart shape;
+7. verify local health/bootstrap and public application behavior;
+8. retain the previous image/source pin for rollback.
+
+## Public acceptance
+
+Guest:
+
+- sees Join + Sign In, not Start;
+- can join a valid room without Account;
+- can opt into location and permitted PTT;
+- can hear only the current shared track;
+- cannot browse EchoVerse or mutate shared playback.
+
+Signed-in member/host:
+
+- Account handoff returns through one-time code/state and creates local encrypted `__session`;
+- Start Ryde appears and server accepts room creation;
+- host can Lock/End;
+- host/co-host can mutate shared playback;
+- EchoVerse browse follows live `echoverse.library.listen` allow/deny/revoke state.
+
+## Current observed runtime state
+
+```text
+ECHOVERSE LIBRARY
+Your account does not currently have EchoVerse Library access.
+
+PUSH TO TALK
+Ready
+TURN not configured · same-network voice may work
 ```
 
-Confirm the EchoVerse Docker network:
+This proves useful application state but does not replace a full deployment acceptance record. The library message is an authorization result; PTT is enabled but WAN/cellular relay is not accepted until TURN is configured.
 
-```bash
-docker inspect echoverse-library-api \
-  --format '{{range $name,$network := .NetworkSettings.Networks}}{{$name}}{{"\\n"}}{{end}}'
-```
+## PTT gate
 
-The new RydeSync container must share a network where `echoverse-library-api:5304` resolves.
+Run `VOICE_DEPLOYMENT.md` with two independent cellular clients. Same-Wi-Fi success is a baseline, not TURN proof.
 
-## 5. Build
+## Repository sync vs production sync
 
-```bash
-cd /srv/NXDrive/EchoVerse/rydesync-global-foundation
-docker build --pull -t rydesync:3.0.0-alpha.7 .
-```
+- **Repo sync:** Alpha.7 changes are integrated to the repository/default branch and all docs/tests agree.
+- **Runtime-code equivalence:** current repo runtime code can be equivalent to deployed release while later commits are docs/tests only.
+- **Production sync:** a new artifact is actually built/deployed and the deployed SHA/image/pin is updated and accepted.
 
-## 6. Replace using the same proven runtime shape
-
-Prefer reproducing the existing alpha.6 container's port/network/restart/env settings rather than inventing a second deployment pattern. If the current service is already the accepted production container, use a short controlled replacement window and retain the old image tag for rollback.
-
-After start:
-
-```bash
-curl -sS http://127.0.0.1:9000/health
-curl -sS http://127.0.0.1:9000/v1/bootstrap | jq
-```
-
-Expected health version: `3.0.0-alpha.7`.
-
-Bootstrap should report:
-
-- `authenticatedHosting: true`
-- `pushToTalk: true`
-- `turnReady: true` only when TURN is actually configured
-- `identity.loginConfigured: true` only when account login + handoff exchange are both configured
-
-## 7. Acceptance test in the public URL
-
-Guest browser:
-
-1. sees `Join a Ryde` + `Sign In`;
-2. does **not** see `Start a Ryde`;
-3. joins a valid room without AeroVista account;
-4. can explicitly Enable PTT;
-5. can explicitly share location;
-6. can Listen with crew to the host's current track;
-7. sees no shared play/pause/seek controls and cannot load the EchoVerse library.
-
-Signed-in host browser:
-
-1. AeroVista sign-in returns to RydeSync through one-time-code handoff;
-2. `Start a Ryde` appears;
-3. starts a room;
-4. can Lock / End the room;
-5. can use PTT;
-6. can browse EchoVerse only if `echoverse.library.listen` is live in AVCC;
-7. can select/play/pause/seek/clear the shared soundtrack.
-
-## 8. PTT production gate
-
-Run the two-independent-cellular-phone test in `VOICE_DEPLOYMENT.md`. Do not equate a same-Wi-Fi success with TURN/cellular readiness.
-
-## 9. Rollback
-
-Keep the alpha.6 image/tag until alpha.7 passes field acceptance. Rollback means recreating the container using the saved alpha.6 image and the same preserved `.env`/network/port shape.
+Only claim the third state after an intentional deployment.

@@ -1,32 +1,42 @@
 # RydeSync Push-to-Talk Deployment & QA
 
-## Architecture
+## Current state
 
-Alpha.7 restores PTT as a small-crew WebRTC mesh.
+Alpha.7 PTT is implemented and the current production UI reports:
+
+```text
+PUSH TO TALK
+Ready
+TURN not configured · same-network voice may work
+```
+
+Interpret this narrowly: the application/signaling/PTT feature is enabled and STUN/easy-NAT operation may work. **Reliable independent-cellular PTT is not accepted until TURN is configured and the field test below passes.**
+
+## Architecture
 
 ```text
 Authenticated Ryde realtime WebSocket
   +-- voice.join / leave
   +-- room-scoped SDP + ICE signaling
-  +-- single-speaker talk-floor authority
+  +-- single-speaker server talk-floor authority
 
 WebRTC peer connections
   +-- microphone audio only
   +-- STUN discovery
-  +-- TURN relay fallback for NAT/cellular
+  +-- TURN relay fallback for difficult NAT/cellular
 ```
 
-The WebSocket never carries audio samples. Cloudflare Tunnel terminates the web/realtime application path, but it is **not a TURN relay**.
+The WebSocket never carries audio samples. Cloudflare Tunnel carries application HTTPS/WebSocket traffic but is **not** a TURN relay.
 
 ## Permission behavior
 
-- `group_ride`: guest `rider` can PTT.
-- `listening_party`: listener/rider/speaker can use voice when enabled.
-- `band_practice`: `speaker` can use voice.
-- `classroom` / `campaign`: listeners are not speakers until promoted. Alpha.7 does not yet restore the host role-promotion UX, so these moderated modes are not voice-parity complete.
+- `group_ride`: guest rider can PTT when enabled.
+- `listening_party`: permitted listener/rider/speaker roles can voice.
+- `band_practice`: speaker can voice.
+- `classroom` / `campaign`: listeners require promotion; Alpha.7 still lacks the full host role-promotion UX.
 - host/co-host are voice-capable.
 
-Microphone capture never begins automatically. The rider must press **Enable PTT** and grant browser microphone permission.
+Microphone capture never begins automatically. The rider explicitly enables PTT and grants browser/device microphone permission.
 
 ## Environment
 
@@ -39,43 +49,35 @@ TURN_USERNAME=
 TURN_CREDENTIAL=
 ```
 
-Multiple STUN/TURN URLs are comma-separated.
-
-When TURN credentials are absent the UI explicitly reports that TURN is not configured. Same-LAN or easy NAT paths may still work through STUN, but that is not enough to declare cellular voice reliable.
+Multiple URLs are comma-separated. `turnReady`/`turnConfigured` must remain false unless URL, username and credential are all present.
 
 ## TURN deployment rule
 
-TURN must be publicly reachable by the phones themselves. Do not point `TURN_URLS` at the RydeSync HTTP Cloudflare Tunnel and do not assume the tunnel can relay UDP/RTP media.
+TURN must be publicly reachable by the clients themselves. A typical coturn deployment exposes `3478/udp`, usually `3478/tcp`, optionally `5349/tcp` for `turns:`, plus a relay port range through firewall/NAT.
 
-A typical coturn deployment exposes at least:
+For broader public use prefer time-limited TURN credentials over permanent shared credentials.
 
-- `3478/udp` and usually `3478/tcp`
-- optionally `5349/tcp` for TURN over TLS (`turns:`)
-- a configured relay port range in the host firewall/NAT
+## Required field acceptance
 
-Use a real public hostname/IP that resolves/reaches the TURN server from cellular networks.
-
-Static username/credential variables are supported for the current alpha. For a larger public deployment, replace long-lived shared credentials with time-limited TURN credentials before broad exposure.
-
-## Required field test
-
-Do not call PTT production-ready until this passes:
-
-1. Phone A on cellular only; Wi-Fi off.
-2. Phone B on a different cellular path/network if possible; Wi-Fi off.
+1. Phone A: cellular only, Wi-Fi off.
+2. Phone B: separate cellular path/network if practical, Wi-Fi off.
 3. Both open `https://rydesync.aerovista.us`.
-4. One signed-in member starts a Ryde; second phone joins as guest.
-5. Both enable PTT and grant microphone permission.
-6. Verify UI says TURN configured.
-7. Hold-to-talk A → B; confirm B hears clear audio.
-8. Hold-to-talk B → A; confirm A hears clear audio.
-9. Attempt simultaneous talk: second rider should receive channel-busy/floor-denied until first releases.
-10. Background/foreground each browser and verify realtime reconnect + voice rejoin.
-11. Transition one device cellular ↔ Wi-Fi and confirm room reconnect behavior.
-12. Watch browser/server logs for signaling errors; confirm no microphone audio payloads appear in server messages/logs.
+4. Signed-in member starts a Ryde; second phone joins as guest.
+5. Both explicitly enable PTT and microphone.
+6. Confirm UI reports TURN configured/ready.
+7. A holds talk → B hears clear audio.
+8. B holds talk → A hears clear audio.
+9. Simultaneous request proves talk-floor busy/deny behavior.
+10. Background/foreground each browser and verify room reconnect + voice rejoin.
+11. Move one device cellular ↔ Wi-Fi and verify reconnection.
+12. Confirm server logs/messages contain signaling only, never microphone audio payloads.
 
-Also test same-Wi-Fi as a separate baseline; it must not substitute for the cellular test.
+Run same-Wi-Fi as a baseline, but never substitute that for the cellular/TURN test.
 
-## Current scale
+## Scale boundary
 
-The alpha uses a peer mesh and caps room voice membership with `VOICE_MAX_PEERS` (default 12). This is appropriate for small ride crews. Larger rooms eventually need an SFU rather than increasing the mesh cap indefinitely.
+Alpha.7 uses a WebRTC peer mesh capped by `VOICE_MAX_PEERS` (default 12). This is appropriate for small crews. Larger rooms should move to an SFU rather than indefinitely raising the mesh cap.
+
+## Automated coverage
+
+The Alpha.7 suite proves PTT feature/bootstrap behavior, room-scoped signaling/floor boundaries, STUN-only readiness, and a synthetic complete TURN configuration. Automated tests cannot prove real-world carrier NAT traversal; that remains the field gate above.
