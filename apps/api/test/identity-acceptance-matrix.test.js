@@ -37,7 +37,16 @@ function baseConfig({ turn = false } = {}) {
         const capabilities = identity === SYNTHETIC_IDENTITIES.revoked01 && revokedLibrary
           ? []
           : identity.capabilities;
-        return principalFor(identity, capabilities);
+        const principal = principalFor(identity, capabilities);
+        if (identity === SYNTHETIC_IDENTITIES.stale01) {
+          return Object.freeze({
+            ...principal,
+            capabilitiesFresh: false,
+            authState: 'handoff_session',
+            reason: 'live_capabilities_not_verified'
+          });
+        }
+        return principal;
       }
     },
     voice: {
@@ -197,14 +206,40 @@ test('revoked01 loses EchoVerse immediately without server restart but remains a
   });
 });
 
-test('expired01 is rejected rather than downgraded into an authenticated session', async () => {
+test('stale01 fails closed for capability-gated access while preserving authenticated identity', async () => {
   const harness = baseConfig();
-  const identity = SYNTHETIC_IDENTITIES.expired01;
+  const identity = SYNTHETIC_IDENTITIES.stale01;
   await withServer(harness.config, async (base) => {
-    for (const path of ['/v1/session', '/v1/echoverse/access']) {
-      const response = await json(await fetch(`${base}${path}`, { headers: authHeaders(identity) }));
-      assert.equal(response.status, 401, `${path} rejects expired01`);
-      assert.equal(response.body.error.code, 'identity_rejected');
+    const session = await json(await fetch(`${base}/v1/session`, { headers: authHeaders(identity) }));
+    assert.equal(session.status, 200);
+    assert.equal(session.body.principal.authenticated, true);
+    assert.equal(session.body.principal.capabilitiesFresh, false);
+    assert.equal(session.body.principal.reason, 'live_capabilities_not_verified');
+
+    const access = await json(await fetch(`${base}/v1/echoverse/access`, { headers: authHeaders(identity) }));
+    assert.equal(access.status, 503);
+    assert.equal(access.body.error.code, 'identity_unavailable');
+
+    const room = await fetch(`${base}/v1/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders(identity) },
+      body: JSON.stringify({ name: 'Stale Authorization General Ryde' })
+    });
+    assert.equal(room.status, 201, 'stale capability snapshot does not erase authenticated identity');
+  });
+});
+
+test('expired and unknown credentials are rejected instead of downgraded', async () => {
+  const harness = baseConfig();
+  await withServer(harness.config, async (base) => {
+    for (const token of [SYNTHETIC_IDENTITIES.expired01.token, 'synthetic-unknown01']) {
+      for (const path of ['/v1/session', '/v1/echoverse/access']) {
+        const response = await json(await fetch(`${base}${path}`, {
+          headers: { authorization: `Bearer ${token}` }
+        }));
+        assert.equal(response.status, 401, `${path} rejects ${token}`);
+        assert.equal(response.body.error.code, 'identity_rejected');
+      }
     }
   });
 });
