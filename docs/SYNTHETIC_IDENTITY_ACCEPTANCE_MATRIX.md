@@ -1,48 +1,78 @@
-# RydeSync Synthetic Identity Acceptance Matrix
+# RydeSync / Identity Synthetic Acceptance Matrix
 
-Status: test-only acceptance fixtures for Alpha 7. These identities are not Firebase users, AVCC production identities, or deployable credentials.
+Status: **test-only cross-layer semantic fixtures**. These names are not production Firebase users, AVCC identities, Account users or deployable credentials.
 
-The goal is to keep identity and authorization regressions reproducible without polluting production data or weakening fail-closed behavior.
+The same semantic identities are reused across RydeSync, the extracted Identity Gateway regression harness, and `member-access` so authorization behavior can be compared without polluting production identity stores.
 
-| Identity | Class | Authenticated | EchoVerse `echoverse.library.listen` | Start Ryde | Join public Ryde | Purpose |
-|---|---|---:|---:|---:|---:|---|
-| `staff01` | staff | yes | allow | allow | allow | staff with library entitlement |
-| `staff02` | staff | yes | deny | allow | allow | staff without library entitlement |
-| `member01` | member | yes | allow | allow | allow | member with library entitlement |
-| `member02` | member | yes | deny | allow | allow | member without library entitlement |
-| `guest01` | guest | no | deny / auth required | deny | allow | anonymous guest boundary |
-| `guest02` | guest | no | deny / auth required | deny | allow | second anonymous guest / multi-join boundary |
-| `revoked01` | member | yes | allow, then live revoke -> deny | allow | allow | convergence/revocation without service restart |
-| `stale01` | member | yes | fail closed with `identity_unavailable` | allow | allow | authenticated identity whose live capability state cannot be verified |
-| `expired01` | member-shaped credential | no | reject | reject | guest only if no credential is supplied | expired-session fail-closed behavior |
-| `synthetic-unknown01` | unknown credential | no | reject | reject | guest only if no credential is supplied | unknown-token fail-closed behavior |
+| Identity | Layer-specific purpose | Expected result |
+|---|---|---|
+| `staff01` | authenticated staff + explicit EchoVerse grant | library allow; authenticated Ryde use allow |
+| `staff02` | authenticated staff without grant | library deny; unrelated authenticated Ryde use remains allowed |
+| `member01` | authenticated member + explicit grant | library allow |
+| `member02` | authenticated member without grant | library deny |
+| `guest01` | anonymous boundary | public join allow; host/library deny |
+| `guest02` | second anonymous participant | multi-user guest join/realtime boundary |
+| `revoked01` | live convergence | allow, then revoke; next capability check denies without service restart |
+| `stale01` | identity known but authorization freshness unavailable | capability action fails closed with 503 |
+| `suspended01` | AVCC account suspension | valid upstream identity proof cannot override suspended account; 403 |
+| `unverified01` | Firebase email verification gate | rejected before canonical bootstrap |
+| `expired01` | expired supplied credential | 401/reject; never silently treated as valid member |
+| `synthetic-unknown01` / `unknown01` | unknown supplied credential | 401/reject; never silently treated as member |
 
 ## Required invariants
 
-1. Account class alone never grants EchoVerse. Staff and member principals must both pass the same explicit capability boundary.
-2. Missing `echoverse.library.listen` returns `403 capability_required`; it does not silently downgrade to library access.
-3. A stale/unverifiable authorization snapshot returns `503 identity_unavailable` for capability-gated operations even when the identity itself remains authenticated.
-4. Expired or unknown credentials return `401 identity_rejected`; supplied bad credentials are never treated as an anonymous guest session.
-5. Authenticated principals may create a Ryde independent of EchoVerse entitlement.
-6. Anonymous guests may join a public Ryde but may not create/host one.
-7. Revoking only the EchoVerse capability is observed on the next authorization check without restarting RydeSync and does not revoke unrelated authenticated Ryde use.
-8. PTT remains enabled with STUN-only ICE configuration while correctly reporting TURN as unavailable.
-9. TURN is reported ready only when TURN URL, username, and credential are all configured.
+1. Staff/member class alone never grants EchoVerse.
+2. `echoverse.library.listen` must be explicitly true.
+3. A stale/unreachable authorization authority cannot become allow.
+4. Supplied bad/expired credentials do not silently downgrade into authenticated or privileged guest behavior.
+5. Authenticated room creation is independent of EchoVerse entitlement.
+6. Anonymous guests may join public Rydes but may not host.
+7. Revoking EchoVerse is visible on the next live check without restarting RydeSync and does not revoke unrelated Ryde identity automatically.
+8. AVCC suspension overrides otherwise valid identity proof.
+9. Profile update inputs cannot smuggle principal type, badges, permissions or access version.
+10. Identity Gateway/adapter HMAC uses the exact raw body/path/timestamp contract.
+11. PTT can report enabled with STUN while TURN remains unavailable.
+12. TURN-ready is true only when TURN URL + username + credential are configured.
 
-## Test implementation
+## RydeSync implementation
 
-Fixtures: `apps/api/test/fixtures/synthetic-identities.js`
-
-Acceptance tests: `apps/api/test/identity-acceptance-matrix.test.js`
-
-Run with the normal repository suite:
-
-```bash
-npm test
+```text
+apps/api/test/fixtures/synthetic-identities.js
+apps/api/test/identity-acceptance-matrix.test.js
 ```
 
-The existing Alpha 7 PR workflow also validates the production Docker Compose configuration after the full Node 22 test suite.
+Current full repository suite: **69/69 passing** plus production Docker Compose validation.
+
+## Canonical Identity Gateway coverage
+
+Canonical production source is:
+
+```text
+aerovista-us/ACOS/main/services/identity-gateway
+```
+
+It contains dedicated tests for Firebase, handoff, broker/RydeSync broker and session behavior under `services/identity-gateway/tests/`.
+
+The standalone `aerovista-us/identity-gateway` repository is a noncanonical extracted/reference regression harness. Its added synthetic HTTP matrix passes **10/10 on Node 20 and 10/10 on Node 22** and verifies guest denial, email verification, expiration/unknown credentials, revocation visibility, suspension propagation, PATCH escalation filtering, HMAC/correlation and logout scoping. Merge: `488aaca1db1cc56536c56b724095cb92fc75b14d`.
+
+## `member-access` coverage
+
+`aerovista-us/member-access` verifies the staff/member access lane using a real local JWKS, real signed RS256 Access JWTs and a real local HTTP AVCC fake rather than mocking signature verification.
+
+Added matrix coverage includes:
+
+- staff/member grant separation;
+- Authentik `custom.sub` preference over Cloudflare synthetic `sub`;
+- documented fallback to Cloudflare `sub`;
+- immediate grant revocation;
+- AVCC suspension override;
+- exact AVCC HMAC/body/service identity;
+- email normalization.
+
+Synthetic extension merge: `dca457fcfe60f6faf8ad179966c10327fea52239`.
 
 ## Production boundary
 
-These names and tokens are intentionally synthetic and must never be added to production AVCC, Firebase, Account, or Identity Gateway stores merely to satisfy tests. A future dedicated test tenant or authority-side provisioning API can reuse the same semantic matrix, but it should preserve the same isolation and fail-closed expectations.
+Do not create real `staff01`, `member01`, etc. in production just to satisfy acceptance tests. A future dedicated test tenant/provisioning lane may reuse these semantics, but it must remain isolated and preserve the same fail-closed rules.
+
+See `IDENTITY_STACK_SCHEMATIC.md` and `SOURCE_AND_PRODUCTION_MAP.md`.
