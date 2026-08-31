@@ -20,6 +20,8 @@ export class VoiceClient {
     this.joined = false;
     this.floorMemberId = null;
     this.pressActive = false;
+    this.turnExpiresAt = null;
+    this.iceRefreshAfter = 0;
   }
 
   #emit(state, detail = null) {
@@ -31,6 +33,45 @@ export class VoiceClient {
     catch { return false; }
   }
 
+  #roomToken() {
+    try {
+      const saved = JSON.parse(globalThis.localStorage?.getItem('rydesync:last-session') || 'null');
+      return typeof saved?.token === 'string' ? saved.token : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async #refreshIceServers({ force = false } = {}) {
+    const now = Date.now();
+    if (!force && this.iceRefreshAfter > now) return true;
+    const roomToken = this.#roomToken();
+    if (!roomToken || typeof globalThis.fetch !== 'function') return false;
+
+    try {
+      const response = await fetch('/v1/voice/ice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ roomToken })
+      });
+      if (!response.ok) {
+        this.iceRefreshAfter = now + 30_000;
+        return false;
+      }
+      const body = await response.json();
+      if (Array.isArray(body?.iceServers) && body.iceServers.length) this.iceServers = body.iceServers;
+      this.turnExpiresAt = body?.expiresAt || null;
+      const expires = Date.parse(this.turnExpiresAt || '');
+      this.iceRefreshAfter = Number.isFinite(expires)
+        ? Math.max(now + 30_000, expires - 60_000)
+        : now + 300_000;
+      return true;
+    } catch {
+      this.iceRefreshAfter = now + 30_000;
+      return false;
+    }
+  }
+
   async enable(selfMemberId) {
     if (this.enabled && this.stream) {
       this.selfMemberId = selfMemberId || this.selfMemberId;
@@ -38,6 +79,7 @@ export class VoiceClient {
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone capture is not supported by this browser');
+    await this.#refreshIceServers({ force: true });
     this.#emit('requesting');
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -55,8 +97,11 @@ export class VoiceClient {
     if (!this.enabled) return;
     this.joined = false;
     this.#muteLocal();
-    this.#send({ type: 'voice.join' });
-    this.#emit('connecting');
+    this.#refreshIceServers().finally(() => {
+      if (!this.enabled) return;
+      this.#send({ type: 'voice.join' });
+      this.#emit('connecting');
+    });
   }
 
   realtimeDisconnected() {
@@ -157,6 +202,7 @@ export class VoiceClient {
     if (!remoteId || remoteId === this.selfMemberId || !this.stream) return null;
     if (this.peers.has(remoteId)) return this.peers.get(remoteId);
 
+    await this.#refreshIceServers();
     const pc = new RTCPeerConnection({ iceServers: this.iceServers });
     this.peers.set(remoteId, pc);
     for (const track of this.stream.getTracks()) pc.addTrack(track, this.stream);
