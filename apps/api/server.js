@@ -133,7 +133,7 @@ export function createApp(config = loadConfig()) {
       if (!config.voice?.enabled) throw new HttpError(409, 'voice_disabled', 'Push-to-talk is disabled on this deployment');
       const body = await readJson(req);
       const { room, member } = resolveRoomMemberFromToken(body.roomToken, 'A valid Ryde room session is required for voice relay credentials');
-      const issued = issueTurnIceServers({ roomId: room.id, memberId: member.id }, config);
+      const issued = issueTurnIceServers({ roomId: room.id, memberId: member.id, roomExpiresAt: room.expiresAt }, config);
       return json(res, 200, {
         ...issued,
         roomId: room.id,
