@@ -13,7 +13,7 @@ function stunServer(config) {
   return Array.isArray(urls) && urls.length ? { urls } : null;
 }
 
-export function issueTurnIceServers({ roomId, memberId }, config, now = Date.now()) {
+export function issueTurnIceServers({ roomId, memberId, roomExpiresAt = null }, config, now = Date.now()) {
   const voice = config?.voice || {};
   const iceServers = [];
   const stun = stunServer(config);
@@ -29,8 +29,17 @@ export function issueTurnIceServers({ roomId, memberId }, config, now = Date.now
   }
 
   if (voice.turnSharedSecret && voice.turnSharedSecret.length >= 16) {
-    const ttlSeconds = Number(voice.turnCredentialTtlSeconds || 1800);
-    const expiresAtSeconds = Math.floor(now / 1000) + ttlSeconds;
+    const ttlSeconds = Number(voice.turnCredentialTtlSeconds || 21_600);
+    const ttlExpiresAtSeconds = Math.floor(now / 1000) + ttlSeconds;
+    const roomExpiresAtMs = Number(roomExpiresAt);
+    const roomExpiresAtSeconds = Number.isFinite(roomExpiresAtMs) && roomExpiresAtMs > now
+      ? Math.floor(roomExpiresAtMs / 1000)
+      : null;
+    // Relay credentials should stay valid for an active long-running Ryde, but
+    // never extend beyond the room's own server-side lifetime when known.
+    const expiresAtSeconds = roomExpiresAtSeconds
+      ? Math.min(ttlExpiresAtSeconds, roomExpiresAtSeconds)
+      : ttlExpiresAtSeconds;
     const subject = `${roomId}:${memberId}`;
     const username = `${expiresAtSeconds}:${subject}`;
     const credential = crypto
