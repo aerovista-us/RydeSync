@@ -103,3 +103,30 @@ test('public responses carry baseline browser security and permission headers', 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('every browser asset referenced by the tabbed product UI is publicly served', async () => {
+  await withServer(async (base) => {
+    const assets = [
+      ['/', 'text/html'],
+      ['/app.js', 'text/javascript'],
+      ['/styles.css', 'text/css'],
+      ['/product-ui.css', 'text/css'],
+      ['/ui-shell.js', 'text/javascript'],
+      ['/catalog-bridge.js', 'text/javascript'],
+      ['/library-ui.js', 'text/javascript'],
+      ['/library-core.js', 'text/javascript'],
+      ['/map.js', 'text/javascript'],
+      ['/map-core.js', 'text/javascript'],
+      ['/sync-core.js', 'text/javascript'],
+      ['/audio-engine.js', 'text/javascript'],
+      ['/voice.js', 'text/javascript']
+    ];
+
+    for (const [pathname, contentType] of assets) {
+      const response = await fetch(`${base}${pathname}`);
+      assert.equal(response.status, 200, `${pathname} should be served`);
+      assert.match(response.headers.get('content-type') || '', new RegExp(`^${contentType.replace('/', '\\/')}`), `${pathname} should have ${contentType}`);
+      assert.ok((await response.text()).length > 0, `${pathname} should not be empty`);
+    }
+  });
+});

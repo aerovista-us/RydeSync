@@ -36,6 +36,8 @@ const rideActions = document.querySelector('#rideActions');
 const realtimePanel = document.querySelector('#realtimePanel');
 const roomEmpty = document.querySelector('#roomEmpty');
 const roomNav = document.querySelector('[data-view-target="room"]');
+const createCard = document.querySelector('#createCard');
+let automaticMemberEntryDone = false;
 
 function syncRideState() {
   const hasResult = result && !result.classList.contains('hidden');
@@ -58,8 +60,17 @@ function syncRoomState() {
   }
 }
 
+function syncMemberEntry() {
+  const canHost = createCard && !createCard.classList.contains('hidden');
+  if (!automaticMemberEntryDone && canHost && !window.location.hash) {
+    automaticMemberEntryDone = true;
+    go('ride');
+  }
+}
+
 new MutationObserver(syncRideState).observe(result, { attributes: true, attributeFilter: ['class'] });
 new MutationObserver(syncRoomState).observe(realtimePanel, { attributes: true, attributeFilter: ['class'] });
+if (createCard) new MutationObserver(syncMemberEntry).observe(createCard, { attributes: true, attributeFilter: ['class'] });
 
 for (const formId of ['createForm', 'joinForm']) {
   document.querySelector(`#${formId}`)?.addEventListener('submit', () => go('ride'));
@@ -69,4 +80,5 @@ document.querySelector('#identityPill')?.addEventListener('click', () => go('acc
 
 syncRideState();
 syncRoomState();
+syncMemberEntry();
 showView(activeViewFromHash());

@@ -212,7 +212,21 @@ export function createApp(config = loadConfig()) {
       return json(res, 200, joined);
     }
 
-    const staticFiles = new Set(['/', '/app.js', '/styles.css', '/map.js', '/map-core.js', '/sync-core.js', '/audio-engine.js', '/voice.js']);
+    const staticFiles = new Set([
+      '/',
+      '/app.js',
+      '/styles.css',
+      '/product-ui.css',
+      '/ui-shell.js',
+      '/catalog-bridge.js',
+      '/library-ui.js',
+      '/library-core.js',
+      '/map.js',
+      '/map-core.js',
+      '/sync-core.js',
+      '/audio-engine.js',
+      '/voice.js'
+    ]);
     if (req.method === 'GET' && staticFiles.has(pathname)) {
       const fileName = pathname === '/' ? 'index.html' : pathname.slice(1);
       const filePath = path.join(webRoot, fileName);
