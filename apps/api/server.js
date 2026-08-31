@@ -11,6 +11,7 @@ import { echoverseAudioPath, echoverseFilePath, fetchCatalog, proxyEchoVerseBina
 import { clearMediaSessionCookie, issueMediaSession, issueRoomMediaSession, mediaSessionCookie, mediaSessionFromRequest } from './lib/media-session.js';
 import { beginBrowserLogin, browserLoginConfigured, browserLogout, completeBrowserLogin } from './lib/browser-auth.js';
 import { verifyRoomToken } from './lib/room-token.js';
+import { issueTurnIceServers, turnIsConfigured } from './lib/turn-credentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../web');
@@ -29,6 +30,18 @@ export function createApp(config = loadConfig()) {
   const rooms = new RoomStore(config);
   let realtimeHub = null;
 
+  function resolveRoomMemberFromToken(roomToken, message = 'A valid Ryde room session is required') {
+    let claims;
+    try { claims = verifyRoomToken(roomToken, config.roomTokenSecret); }
+    catch { throw new HttpError(401, 'room_auth_required', message); }
+    const room = rooms.resolve(claims.room_id);
+    const member = room.members.get(claims.member_id);
+    if (!member || member.role !== claims.role || member.identityId !== claims.identity_id) {
+      throw new HttpError(401, 'room_auth_required', 'Ryde room membership is no longer valid');
+    }
+    return { claims, room, member };
+  }
+
   async function route(req, res) {
     const url = new URL(req.url, config.publicBaseUrl);
     const pathname = url.pathname;
@@ -38,6 +51,7 @@ export function createApp(config = loadConfig()) {
     }
 
     if (req.method === 'GET' && pathname === '/v1/bootstrap') {
+      const turnConfigured = turnIsConfigured(config);
       return json(res, 200, {
         service: 'rydesync',
         version: '3.0.0-alpha.7',
@@ -61,7 +75,7 @@ export function createApp(config = loadConfig()) {
           androidFoundation: true,
           authenticatedHosting: true,
           pushToTalk: Boolean(config.voice?.enabled),
-          turnReady: Boolean(config.voice?.turnUrls?.length && config.voice?.turnUsername && config.voice?.turnCredential)
+          turnReady: turnConfigured
         },
         playback: {
           syncIntervalMs: config.playback?.syncIntervalMs ?? 10000,
@@ -71,13 +85,13 @@ export function createApp(config = loadConfig()) {
         voice: {
           enabled: Boolean(config.voice?.enabled),
           maxPeers: config.voice?.maxPeers ?? 12,
-          iceServers: [
-            ...(config.voice?.stunUrls?.length ? [{ urls: config.voice.stunUrls }] : []),
-            ...(config.voice?.turnUrls?.length && config.voice?.turnUsername && config.voice?.turnCredential
-              ? [{ urls: config.voice.turnUrls, username: config.voice.turnUsername, credential: config.voice.turnCredential }]
-              : [])
-          ],
-          turnConfigured: Boolean(config.voice?.turnUrls?.length && config.voice?.turnUsername && config.voice?.turnCredential)
+          // Public bootstrap contains only STUN. TURN credentials are issued
+          // after a valid room token is presented to /v1/voice/ice.
+          iceServers: config.voice?.stunUrls?.length ? [{ urls: config.voice.stunUrls }] : [],
+          turnConfigured,
+          turnCredentialMode: turnConfigured
+            ? (config.voice?.turnSharedSecret ? 'room-ephemeral' : 'room-static-legacy')
+            : 'none'
         },
         location: {
           minIntervalMs: config.location.minIntervalMs,
@@ -115,6 +129,19 @@ export function createApp(config = loadConfig()) {
       return json(res, 200, { principal });
     }
 
+    if (req.method === 'POST' && pathname === '/v1/voice/ice') {
+      if (!config.voice?.enabled) throw new HttpError(409, 'voice_disabled', 'Push-to-talk is disabled on this deployment');
+      const body = await readJson(req);
+      const { room, member } = resolveRoomMemberFromToken(body.roomToken, 'A valid Ryde room session is required for voice relay credentials');
+      const issued = issueTurnIceServers({ roomId: room.id, memberId: member.id }, config);
+      return json(res, 200, {
+        ...issued,
+        roomId: room.id,
+        memberId: member.id,
+        secretExposed: false
+      });
+    }
+
     if (req.method === 'GET' && pathname === '/v1/echoverse/access') {
       const principal = await resolveIdentity(req, config);
       requireCapability(principal, 'echoverse.library.listen');
@@ -150,14 +177,7 @@ export function createApp(config = loadConfig()) {
 
     if (req.method === 'POST' && pathname === '/v1/echoverse/room-media-session') {
       const body = await readJson(req);
-      let claims;
-      try { claims = verifyRoomToken(body.roomToken, config.roomTokenSecret); }
-      catch { throw new HttpError(401, 'room_auth_required', 'A valid Ryde room session is required for shared music'); }
-      const room = rooms.resolve(claims.room_id);
-      const member = room.members.get(claims.member_id);
-      if (!member || member.role !== claims.role || member.identityId !== claims.identity_id) {
-        throw new HttpError(401, 'room_auth_required', 'Ryde room membership is no longer valid');
-      }
+      const { room, member } = resolveRoomMemberFromToken(body.roomToken, 'A valid Ryde room session is required for shared music');
       const playback = realtimeHub?.playbackForRoom(room.id);
       if (!playback?.trackId) throw new HttpError(409, 'no_shared_track', 'The Ryde does not currently have a shared track');
       const session = issueRoomMediaSession({ roomId: room.id, memberId: member.id, trackId: playback.trackId }, config);
@@ -166,6 +186,7 @@ export function createApp(config = loadConfig()) {
         trackId: playback.trackId,
         expiresAt: session.expiresAt,
         scope: 'current-room-track',
+        credentialExposed: false,
         libraryGranted: false
       }, { 'set-cookie': mediaSessionCookie(session, config) });
     }

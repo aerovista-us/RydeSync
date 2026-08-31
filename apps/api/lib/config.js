@@ -68,6 +68,13 @@ export function loadConfig() {
       maxPeers: intEnv('VOICE_MAX_PEERS', 12, { min: 2, max: 24 }),
       stunUrls: csvEnv('STUN_URLS', ['stun:stun.l.google.com:19302']),
       turnUrls: csvEnv('TURN_URLS'),
+      // Preferred production mode. RydeSync signs short-lived TURN REST
+      // credentials only after a valid room token is presented.
+      turnSharedSecret: process.env.TURN_SHARED_SECRET || '',
+      turnRealm: process.env.TURN_REALM || 'turn.rydesync.aerovista.us',
+      turnCredentialTtlSeconds: intEnv('TURN_CREDENTIAL_TTL_SECONDS', 1800, { min: 300, max: 86400 }),
+      // Legacy static credentials remain accepted for controlled environments,
+      // but are never emitted by the public bootstrap endpoint.
       turnUsername: process.env.TURN_USERNAME || '',
       turnCredential: process.env.TURN_CREDENTIAL || ''
     }),
