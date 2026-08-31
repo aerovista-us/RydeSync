@@ -252,6 +252,7 @@ test('PTT bootstrap is ready with STUN alone and accurately reports TURN readine
     assert.equal(bootstrap.body.features.pushToTalk, true);
     assert.equal(bootstrap.body.features.turnReady, false);
     assert.equal(bootstrap.body.voice.turnConfigured, false);
+    assert.equal(bootstrap.body.voice.turnCredentialMode, 'none');
     assert.deepEqual(bootstrap.body.voice.iceServers, [{ urls: ['stun:stun.l.google.com:19302'] }]);
   });
 
@@ -262,7 +263,8 @@ test('PTT bootstrap is ready with STUN alone and accurately reports TURN readine
     assert.equal(bootstrap.body.features.pushToTalk, true);
     assert.equal(bootstrap.body.features.turnReady, true);
     assert.equal(bootstrap.body.voice.turnConfigured, true);
-    assert.equal(bootstrap.body.voice.iceServers.length, 2);
-    assert.equal(bootstrap.body.voice.iceServers[1].username, 'synthetic-turn-user');
+    assert.equal(bootstrap.body.voice.turnCredentialMode, 'room-static-legacy');
+    assert.deepEqual(bootstrap.body.voice.iceServers, [{ urls: ['stun:stun.l.google.com:19302'] }]);
+    assert.doesNotMatch(JSON.stringify(bootstrap.body), /synthetic-turn-user|synthetic-turn-credential|turn\.test\.invalid/);
   });
 });
