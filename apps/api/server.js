@@ -15,6 +15,16 @@ import { verifyRoomToken } from './lib/room-token.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../web');
 
+async function serveWebFile(res, fileName) {
+  const filePath = path.join(webRoot, fileName);
+  const content = await fs.readFile(filePath);
+  const type = fileName.endsWith('.html') ? 'text/html; charset=utf-8'
+    : fileName.endsWith('.js') ? 'text/javascript; charset=utf-8'
+      : 'text/css; charset=utf-8';
+  res.writeHead(200, { 'content-type': type, 'content-length': content.length, 'cache-control': 'no-cache' });
+  return res.end(content);
+}
+
 export function createApp(config = loadConfig()) {
   const rooms = new RoomStore(config);
   let realtimeHub = null;
@@ -212,6 +222,11 @@ export function createApp(config = loadConfig()) {
       return json(res, 200, joined);
     }
 
+    const invitePageMatch = /^\/join\/([A-HJ-NP-Z2-9]{8})\/?$/i.exec(pathname);
+    if (req.method === 'GET' && invitePageMatch) {
+      return serveWebFile(res, 'join.html');
+    }
+
     const staticFiles = new Set([
       '/',
       '/app.js',
@@ -221,6 +236,9 @@ export function createApp(config = loadConfig()) {
       '/catalog-bridge.js',
       '/library-ui.js',
       '/library-core.js',
+      '/qr-lite.js',
+      '/join.js',
+      '/join.css',
       '/map.js',
       '/map-core.js',
       '/sync-core.js',
@@ -229,13 +247,7 @@ export function createApp(config = loadConfig()) {
     ]);
     if (req.method === 'GET' && staticFiles.has(pathname)) {
       const fileName = pathname === '/' ? 'index.html' : pathname.slice(1);
-      const filePath = path.join(webRoot, fileName);
-      const content = await fs.readFile(filePath);
-      const type = fileName.endsWith('.html') ? 'text/html; charset=utf-8'
-        : fileName.endsWith('.js') ? 'text/javascript; charset=utf-8'
-          : 'text/css; charset=utf-8';
-      res.writeHead(200, { 'content-type': type, 'content-length': content.length, 'cache-control': 'no-cache' });
-      return res.end(content);
+      return serveWebFile(res, fileName);
     }
 
     throw new HttpError(404, 'not_found', 'Route not found');
