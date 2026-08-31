@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#071014" />
+  <title>Join Ryde · RydeSync</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/join.css" />
+</head>
+<body>
+  <main class="join-shell">
+    <header class="join-brand">
+      <div class="eyebrow">AEROVISTA // ECHOVERSE</div>
+      <h1>RYDE<span>SYNC</span></h1>
+      <p>One scan. One choice. You're in.</p>
+    </header>
+
+    <section class="join-card" aria-live="polite">
+      <div class="card-kicker">RYDE INVITE</div>
+      <h2 id="roomName">Finding your Ryde…</h2>
+      <p id="roomMeta" class="join-meta">Checking the room code from this invite.</p>
+      <div class="join-code">JOIN ID <strong id="roomCode">—</strong></div>
+
+      <div id="joinError" class="join-error hidden"></div>
+
+      <div id="choicePanel" class="choice-panel hidden">
+        <form id="guestJoinForm" class="guest-join-form">
+          <label>Your name
+            <input id="guestName" name="displayName" placeholder="Guest Rider" maxlength="60" autocomplete="name" />
+          </label>
+          <button type="submit">Continue as Guest</button>
+          <small>No account required. Guest access stays scoped to this Ryde.</small>
+        </form>
+
+        <div class="join-divider"><span>or</span></div>
+
+        <a id="memberSignIn" class="member-sign-in" href="#">Sign in with AeroVista</a>
+        <p id="memberHint" class="member-hint">Use your AeroVista identity for member features and EchoVerse access.</p>
+      </div>
+
+      <div id="memberPanel" class="member-panel hidden">
+        <p id="memberStatus">Signed in. Joining this Ryde…</p>
+        <button id="memberJoin" type="button" class="hidden">Join this Ryde</button>
+      </div>
+    </section>
+
+    <a class="join-home" href="/">Open RydeSync instead</a>
+  </main>
+  <script type="module" src="/join.js"></script>
+</body>
+</html>
