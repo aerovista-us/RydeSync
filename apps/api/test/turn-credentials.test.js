@@ -31,6 +31,20 @@ test('TURN REST credentials are deterministic HMAC-SHA1, scoped and expiring', (
   assert.deepEqual(turn.urls, cfg.voice.turnUrls);
 });
 
+test('TURN credential expiration never extends beyond the Ryde lifetime', () => {
+  const cfg = turnConfig();
+  cfg.voice.turnCredentialTtlSeconds = 21_600;
+  const now = 1_700_000_000_000;
+  const roomExpiresAt = now + 3_600_000;
+  const issued = issueTurnIceServers({
+    roomId: 'ryde_lifetime',
+    memberId: 'member_lifetime',
+    roomExpiresAt
+  }, cfg, now);
+  assert.equal(issued.expiresAt, new Date(roomExpiresAt).toISOString());
+  assert.match(issued.iceServers[1].username, /^1700003600:ryde_lifetime:member_lifetime$/);
+});
+
 function appConfig() {
   return {
     nodeEnv: 'test', port: 0, publicBaseUrl: 'http://127.0.0.1',
@@ -48,7 +62,7 @@ function appConfig() {
       turnUrls: ['turn:turn.rydesync.aerovista.us:3478?transport=udp', 'turn:turn.rydesync.aerovista.us:3478?transport=tcp'],
       turnSharedSecret: 'shared-secret-1234567890',
       turnRealm: 'turn.rydesync.aerovista.us',
-      turnCredentialTtlSeconds: 1800,
+      turnCredentialTtlSeconds: 7200,
       turnUsername: '', turnCredential: ''
     },
     realtime: { authTimeoutMs: 5000, heartbeatMs: 60000, maxMessageBytes: 32768 },
@@ -82,7 +96,7 @@ test('public bootstrap advertises TURN readiness without exposing relay credenti
   });
 });
 
-test('TURN credentials require a live Ryde room token', async () => {
+test('TURN credentials require a live Ryde room token and are capped by room expiry', async () => {
   await withServer(async (base) => {
     const createdResponse = await fetch(`${base}/v1/rooms`, {
       method: 'POST',
@@ -110,6 +124,7 @@ test('TURN credentials require a live Ryde room token', async () => {
     assert.equal(body.iceServers.length, 2);
     assert.match(body.iceServers[1].username, /^\d+:ryde_[A-Za-z0-9_-]+:[0-9a-f-]+$/);
     assert.ok(body.iceServers[1].credential.length > 20);
+    assert.ok(Date.parse(body.expiresAt) <= Date.parse(created.room.expiresAt));
     assert.doesNotMatch(JSON.stringify(body), /shared-secret-1234567890/);
   });
 });
