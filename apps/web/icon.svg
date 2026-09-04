@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RydeSync">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="40%" r="70%"><stop offset="0" stop-color="#0f3540"/><stop offset="1" stop-color="#071014"/></radialGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#g)"/>
+  <path d="M256 72 440 256 256 440 72 256Z" fill="#0b252c" stroke="#14d9ff" stroke-width="10"/>
+  <path d="M256 132 380 256 256 380 132 256Z" fill="#14d9ff" filter="url(#glow)"/>
+  <path d="M190 180v154m0-151h64c42 0 66 20 66 53 0 29-19 47-51 51l64 60" fill="none" stroke="#031013" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M297 196c-12-17-31-25-52-25-27 0-48 13-48 33 0 52 109 13 109 75 0 25-23 42-54 42-25 0-46-10-59-29" fill="none" stroke="#031013" stroke-width="20" stroke-linecap="round"/>
+</svg>
