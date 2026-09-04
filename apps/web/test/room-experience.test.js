@@ -34,6 +34,9 @@ test('host-created rooms are kept in Your Rooms and start-a-Ryde is suppressed w
 test('all existing room modes have an intentional presentation profile', () => {
   for (const mode of ['group_ride', 'listening_party', 'classroom', 'band_practice', 'campaign']) {
     assert.match(bridge, new RegExp(`${mode}:`));
-    assert.match(bridge, new RegExp(`mode-${mode}`));
   }
+  assert.match(bridge, /body\.classList\.add\(`mode-\$\{mode\}`\)/);
+  assert.match(bridge, /createHint/);
+  assert.match(bridge, /roomTitle/);
+  assert.match(bridge, /musicTitle/);
 });
