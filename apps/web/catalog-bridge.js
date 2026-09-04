@@ -26,4 +26,6 @@
 
     return response;
   };
+
+  import('/pwa.js').catch((error) => console.warn('[rydesync] PWA bootstrap failed', error));
 })();
