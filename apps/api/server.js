@@ -16,13 +16,26 @@ import { issueTurnIceServers, turnIsConfigured } from './lib/turn-credentials.js
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../web');
 
+function webContentType(fileName) {
+  if (fileName.endsWith('.html')) return 'text/html; charset=utf-8';
+  if (fileName.endsWith('.js')) return 'text/javascript; charset=utf-8';
+  if (fileName.endsWith('.css')) return 'text/css; charset=utf-8';
+  if (fileName.endsWith('.webmanifest')) return 'application/manifest+json; charset=utf-8';
+  if (fileName.endsWith('.json')) return 'application/json; charset=utf-8';
+  if (fileName.endsWith('.svg')) return 'image/svg+xml; charset=utf-8';
+  return 'application/octet-stream';
+}
+
 async function serveWebFile(res, fileName) {
   const filePath = path.join(webRoot, fileName);
   const content = await fs.readFile(filePath);
-  const type = fileName.endsWith('.html') ? 'text/html; charset=utf-8'
-    : fileName.endsWith('.js') ? 'text/javascript; charset=utf-8'
-      : 'text/css; charset=utf-8';
-  res.writeHead(200, { 'content-type': type, 'content-length': content.length, 'cache-control': 'no-cache' });
+  const headers = {
+    'content-type': webContentType(fileName),
+    'content-length': content.length,
+    'cache-control': 'no-cache'
+  };
+  if (fileName === 'sw.js') headers['service-worker-allowed'] = '/';
+  res.writeHead(200, headers);
   return res.end(content);
 }
 
@@ -267,7 +280,13 @@ export function createApp(config = loadConfig()) {
       '/map-core.js',
       '/sync-core.js',
       '/audio-engine.js',
-      '/voice.js'
+      '/voice.js',
+      '/pwa.js',
+      '/sw.js',
+      '/manifest.webmanifest',
+      '/offline.html',
+      '/icon.svg',
+      '/icon-maskable.svg'
     ]);
     if (req.method === 'GET' && staticFiles.has(pathname)) {
       const fileName = pathname === '/' ? 'index.html' : pathname.slice(1);
