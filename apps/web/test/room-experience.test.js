@@ -12,6 +12,13 @@ test('stale realtime rooms terminate reconnect and clean the local active sessio
   assert.match(bridge, /removeSaved:\s*true/);
 });
 
+test('forwarded WebSocket events are cloned before redispatch', () => {
+  assert.match(bridge, /new Event\('open'\)/);
+  assert.match(bridge, /new MessageEvent\('message'/);
+  assert.match(bridge, /new Event\('error'\)/);
+  assert.doesNotMatch(bridge, /dispatchEvent\(event\)/);
+});
+
 test('explicit leave closes realtime and preserves a saved room for later', () => {
   assert.match(bridge, /leave\(roomRef\)/);
   assert.match(bridge, /close\(4005, 'Left Ryde on this device'\)/);
