@@ -162,6 +162,14 @@
     });
   }
 
+  function cloneMessageEvent(event) {
+    return new MessageEvent('message', {
+      data: event.data,
+      origin: event.origin,
+      lastEventId: event.lastEventId
+    });
+  }
+
   class ResilientWebSocket extends EventTarget {
     constructor(url, protocols) {
       super();
@@ -171,9 +179,9 @@
       this._closedToApp = false;
       realtimeSockets.add(this);
 
-      this._native.addEventListener('open', (event) => this.dispatchEvent(event));
-      this._native.addEventListener('message', (event) => this.dispatchEvent(event));
-      this._native.addEventListener('error', (event) => this.dispatchEvent(event));
+      this._native.addEventListener('open', () => this.dispatchEvent(new Event('open')));
+      this._native.addEventListener('message', (event) => this.dispatchEvent(cloneMessageEvent(event)));
+      this._native.addEventListener('error', () => this.dispatchEvent(new Event('error')));
       this._native.addEventListener('close', async (event) => {
         realtimeSockets.delete(this);
         if (this._closedToApp) return;
