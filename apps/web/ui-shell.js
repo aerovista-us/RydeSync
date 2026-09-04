@@ -1,5 +1,118 @@
 import { qrSvg } from './qr-lite.js';
 
+function installDashboardShell() {
+  if (!document.querySelector('link[href="/dashboard.css"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/dashboard.css';
+    document.head.append(link);
+  }
+
+  const nav = document.querySelector('.app-nav');
+  if (nav && !nav.querySelector('[data-view-target="dashboard"]')) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'app-nav-item';
+    button.dataset.viewTarget = 'dashboard';
+    button.innerHTML = '<span>05</span>Dashboard';
+    nav.append(button);
+  }
+
+  if (!document.querySelector('#dashboardView')) {
+    const section = document.createElement('section');
+    section.id = 'dashboardView';
+    section.className = 'app-view';
+    section.dataset.view = 'dashboard';
+    section.hidden = true;
+    section.innerHTML = `
+      <div class="page-heading">
+        <div>
+          <div class="eyebrow">OBSERVABILITY</div>
+          <h2>What is happening in my Ryde right now?</h2>
+        </div>
+        <p>A read-only operating view of the room contracts already in use. No second authority, no new auth path, and no hidden control plane.</p>
+      </div>
+
+      <section class="dashboard-summary">
+        <div>
+          <div class="card-kicker">CURRENT RYDE</div>
+          <h3 id="dashRoomName">No active Ryde</h3>
+          <p>Live room state is projected from the same presence, voice, location, playback, and sync surfaces used elsewhere in RydeSync.</p>
+        </div>
+        <div class="dashboard-overall">
+          <span id="dashOverallStatus" class="dashboard-status warn">NO ACTIVE RYDE</span>
+          <small>Last observed <strong id="dashUpdatedAt">—</strong></small>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="dashboard-card">
+          <div class="dashboard-card-head"><h3>Ryde</h3><span class="card-kicker">ROOM</span></div>
+          <dl class="dashboard-metrics">
+            <div class="dashboard-metric"><dt>Riders</dt><dd id="dashRiderCount">0</dd></div>
+            <div class="dashboard-metric"><dt>Sequence</dt><dd id="dashRoomSeq">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="dashboard-card dashboard-wide">
+          <div class="dashboard-card-head"><h3>Voice</h3><span id="dashVoiceStatus" class="dashboard-status">Off</span></div>
+          <dl class="dashboard-metrics">
+            <div class="dashboard-metric"><dt>Voice peers</dt><dd id="dashVoicePeers">0</dd></div>
+            <div class="dashboard-metric"><dt>Current speaker</dt><dd id="dashVoiceSpeaker">Channel clear</dd></div>
+            <div class="dashboard-metric"><dt>Selected ICE path</dt><dd><span id="dashVoicePath" class="dashboard-status warn">Pending</span></dd></div>
+            <div class="dashboard-metric"><dt>TURN readiness</dt><dd><span id="dashTurnStatus" class="dashboard-status">TURN status unknown</span></dd></div>
+            <div class="dashboard-metric"><dt>TURN credential health</dt><dd id="dashTurnExpiry">Credential expiry unavailable</dd></div>
+          </dl>
+        </article>
+
+        <article class="dashboard-card">
+          <div class="dashboard-card-head"><h3>Network</h3><span id="dashNetworkStatus" class="dashboard-status warn">NO ACTIVE RYDE</span></div>
+          <dl class="dashboard-metrics">
+            <div class="dashboard-metric"><dt>Realtime sequence</dt><dd id="dashNetworkSeq">—</dd></div>
+            <div class="dashboard-metric"><dt>Reconnect state</dt><dd>Mirrors realtime status</dd></div>
+          </dl>
+        </article>
+
+        <article class="dashboard-card">
+          <div class="dashboard-card-head"><h3>Location</h3><span id="dashLocationStatus" class="dashboard-status">Off</span></div>
+          <dl class="dashboard-metrics">
+            <div class="dashboard-metric"><dt>This device sharing</dt><dd id="dashLocationSharing">OFF</dd></div>
+            <div class="dashboard-metric"><dt>Visible riders</dt><dd id="dashLocationCount">0</dd></div>
+          </dl>
+        </article>
+
+        <article class="dashboard-card dashboard-wide">
+          <div class="dashboard-card-head"><h3>Music</h3><span id="dashMusicState" class="dashboard-status">IDLE</span></div>
+          <dl class="dashboard-metrics">
+            <div class="dashboard-metric"><dt>Shared track</dt><dd id="dashMusicTitle">No shared track</dd></div>
+            <div class="dashboard-metric"><dt>Playback</dt><dd id="dashMusicDetail">Room soundtrack is idle</dd></div>
+            <div class="dashboard-metric"><dt>Local audio</dt><dd><span id="dashAudioStatus" class="dashboard-status">OFF</span></dd></div>
+          </dl>
+        </article>
+
+        <article class="dashboard-card">
+          <div class="dashboard-card-head"><h3>Sync</h3><span id="dashSyncStatus" class="dashboard-status">OFF</span></div>
+          <dl class="dashboard-metrics">
+            <div class="dashboard-metric"><dt>Observed drift</dt><dd id="dashSyncDrift">—</dd></div>
+            <div class="dashboard-metric"><dt>Correction</dt><dd id="dashSyncCorrection">none</dd></div>
+          </dl>
+        </article>
+      </section>
+
+      <div class="dashboard-actions">
+        <span class="dashboard-actions-label">Existing quick actions</span>
+        <button type="button" class="mini" data-view-jump="room">Open Room + Map</button>
+        <button type="button" class="mini secondary" data-view-jump="music">Open Music</button>
+        <button type="button" class="mini secondary" data-view-jump="ride">Ryde invite</button>
+        <button type="button" class="mini secondary" data-view-jump="access">Access</button>
+      </div>
+      <p class="dashboard-note">Dashboard v1 is observational. Direct vs TURN Relay is derived from the browser's selected WebRTC candidate pair; candidate addresses and credentials are intentionally not displayed.</p>`;
+    document.querySelector('footer')?.before(section);
+  }
+}
+
+installDashboardShell();
+
 const views = new Map([...document.querySelectorAll('[data-view]')].map((el) => [el.dataset.view, el]));
 const navItems = [...document.querySelectorAll('[data-view-target]')];
 const validViews = new Set(views.keys());
@@ -18,7 +131,7 @@ function showView(name) {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
-  const labels = { access: 'Login', ride: 'Ryde', room: 'Room + Map', music: 'Music' };
+  const labels = { access: 'Login', ride: 'Ryde', room: 'Room + Map', music: 'Music', dashboard: 'Dashboard' };
   document.title = `RydeSync · ${labels[target] || 'RydeSync'}`;
 }
 
@@ -164,3 +277,4 @@ syncRideState();
 syncRoomState();
 syncMemberEntry();
 showView(activeViewFromHash());
+import('./dashboard.js').catch((error) => console.error('[rydesync] dashboard failed to load', error));

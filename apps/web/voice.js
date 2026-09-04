@@ -6,6 +6,31 @@ export function shouldInitiateOffer(selfMemberId, remoteMemberId) {
   return Boolean(selfMemberId && remoteMemberId && String(selfMemberId).localeCompare(String(remoteMemberId)) < 0);
 }
 
+function statsValues(report) {
+  if (!report) return [];
+  if (Array.isArray(report)) return report;
+  if (typeof report.values === 'function') return [...report.values()];
+  if (typeof report[Symbol.iterator] === 'function') {
+    return [...report].map((entry) => Array.isArray(entry) ? entry[1] : entry);
+  }
+  return Object.values(report);
+}
+
+export function selectedIcePathFromStats(report) {
+  const values = statsValues(report).filter(Boolean);
+  const byId = new Map(values.filter((entry) => entry.id).map((entry) => [entry.id, entry]));
+  const transport = values.find((entry) => entry.type === 'transport' && entry.selectedCandidatePairId);
+  let pair = transport ? byId.get(transport.selectedCandidatePairId) : null;
+  if (!pair) pair = values.find((entry) => entry.type === 'candidate-pair' && entry.selected);
+  if (!pair) pair = values.find((entry) => entry.type === 'candidate-pair' && entry.nominated && entry.state === 'succeeded');
+  if (!pair) return null;
+
+  const local = byId.get(pair.localCandidateId);
+  const remote = byId.get(pair.remoteCandidateId);
+  if (!local && !remote) return null;
+  return [local?.candidateType, remote?.candidateType].includes('relay') ? 'turn-relay' : 'direct';
+}
+
 export class VoiceClient {
   constructor({ iceServers = [], send, onState = () => {}, onFloor = () => {} } = {}) {
     this.iceServers = Array.isArray(iceServers) ? iceServers : [];
@@ -22,15 +47,34 @@ export class VoiceClient {
     this.pressActive = false;
     this.turnExpiresAt = null;
     this.iceRefreshAfter = 0;
+    this.connectionPaths = new Map();
+  }
+
+  #selectedPath() {
+    const values = [...this.connectionPaths.values()];
+    if (values.includes('turn-relay')) return 'turn-relay';
+    if (values.includes('direct')) return 'direct';
+    return null;
   }
 
   #emit(state, detail = null) {
-    this.onState({ state, detail, peerCount: this.peers.size, floorMemberId: this.floorMemberId });
+    const payload = {
+      state,
+      detail,
+      peerCount: this.peers.size,
+      floorMemberId: this.floorMemberId,
+      selectedPath: this.#selectedPath(),
+      turnExpiresAt: this.turnExpiresAt
+    };
+    this.onState(payload);
+    if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.CustomEvent === 'function') {
+      globalThis.dispatchEvent(new CustomEvent('rydesync:voice-observability', { detail: payload }));
+    }
   }
 
   #send(value) {
-    try { return this.send?.(value) !== false; }
-    catch { return false; }
+    try { return this.send?.(value) !== false;
+    } catch { return false; }
   }
 
   #roomToken() {
@@ -65,6 +109,7 @@ export class VoiceClient {
       this.iceRefreshAfter = Number.isFinite(expires)
         ? Math.max(now + 30_000, expires - 60_000)
         : now + 300_000;
+      this.#emit(this.enabled ? (this.joined ? 'ready' : 'connecting') : 'off');
       return true;
     } catch {
       this.iceRefreshAfter = now + 30_000;
@@ -123,6 +168,7 @@ export class VoiceClient {
     this.enabled = false;
     this.joined = false;
     this.floorMemberId = null;
+    this.connectionPaths.clear();
     this.#emit('off');
     this.onFloor({ memberId: null, active: false });
   }
@@ -198,6 +244,18 @@ export class VoiceClient {
     for (const track of this.stream.getAudioTracks()) track.enabled = maySend;
   }
 
+  async #observePeerPath(remoteId, pc) {
+    if (!pc?.getStats) return;
+    try {
+      const path = selectedIcePathFromStats(await pc.getStats());
+      if (!path) return;
+      this.connectionPaths.set(remoteId, path);
+      this.#emit('ready');
+    } catch {
+      // Observability must never interfere with an otherwise healthy voice path.
+    }
+  }
+
   async #ensurePeer(remoteId) {
     if (!remoteId || remoteId === this.selfMemberId || !this.stream) return null;
     if (this.peers.has(remoteId)) return this.peers.get(remoteId);
@@ -228,7 +286,13 @@ export class VoiceClient {
     };
     pc.onconnectionstatechange = () => {
       if (['failed', 'closed'].includes(pc.connectionState)) this.#removePeer(remoteId);
-      else if (pc.connectionState === 'connected') this.#emit('ready');
+      else if (pc.connectionState === 'connected') {
+        this.#emit('ready');
+        this.#observePeerPath(remoteId, pc);
+      }
+    };
+    pc.oniceconnectionstatechange = () => {
+      if (['connected', 'completed'].includes(pc.iceConnectionState)) this.#observePeerPath(remoteId, pc);
     };
 
     if (shouldInitiateOffer(this.selfMemberId, remoteId)) {
@@ -263,6 +327,7 @@ export class VoiceClient {
       this.peers.delete(remoteId);
       try { pc.close(); } catch {}
     }
+    this.connectionPaths.delete(remoteId);
     const audio = this.audios.get(remoteId);
     if (audio) {
       this.audios.delete(remoteId);
