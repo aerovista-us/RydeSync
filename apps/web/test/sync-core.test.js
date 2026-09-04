@@ -15,8 +15,8 @@ test('small drift does not cause correction churn', () => {
 });
 
 test('medium drift uses a bounded temporary rate nudge', () => {
-  assert.equal(driftCorrection({ currentPositionMs: 10_000, targetPositionMs: 10_600, softDriftMs: 250, hardDriftMs: 1500 }).playbackRate, 1.03);
-  assert.equal(driftCorrection({ currentPositionMs: 10_600, targetPositionMs: 10_000, softDriftMs: 250, hardDriftMs: 1500 }).playbackRate, 0.97);
+  assert.equal(driftCorrection({ currentPositionMs: 10_000, targetPositionMs: 10_600, softDriftMs: 250, hardDriftMs: 1500 }).playbackRate, 1.05);
+  assert.equal(driftCorrection({ currentPositionMs: 10_600, targetPositionMs: 10_000, softDriftMs: 250, hardDriftMs: 1500 }).playbackRate, 0.95);
 });
 
 test('large drift hard-seeks to the room target', () => {

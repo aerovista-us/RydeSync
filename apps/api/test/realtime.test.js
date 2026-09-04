@@ -7,7 +7,8 @@ function config() {
     nodeEnv: 'test', port: 0, publicBaseUrl: 'http://127.0.0.1',
     roomTokenSecret: 'w'.repeat(48), generatedDevSecret: false,
     roomTtlSeconds: 3600, memberTokenTtlSeconds: 3600,
-    identity: { mode: 'optional', baseUrl: '', verifyPath: '', timeoutMs: 250, appId: 'rydesync', loginUrl: '' },
+    identity: { mode: 'optional', baseUrl: '', verifyPath: '', timeoutMs: 250, appId: 'rydesync', loginUrl: '', verifyToken: async () => ({ identity_id: 'identity_test_host', display_name: 'Test Host', capabilities: ['echoverse.library.listen'] }) },
+    voice: { enabled: true, maxPeers: 12, stunUrls: ['stun:example.test'], turnUrls: [], turnUsername: '', turnCredential: '' },
     realtime: { authTimeoutMs: 1000, heartbeatMs: 60_000, maxMessageBytes: 32_768 },
     location: { minIntervalMs: 1000, staleAfterMs: 120000, maxClientAgeMs: 30000, maxFutureSkewMs: 10000, maxAccuracyMeters: 5000 },
     echoverse: { libraryApiUrl: 'http://echoverse-library-api:5304' }
@@ -31,7 +32,7 @@ async function closeServer(server) {
 
 async function createRoom(httpBase, name = 'Realtime Test') {
   const response = await fetch(`${httpBase}/v1/rooms`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name })
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer test-host' }, body: JSON.stringify({ name })
   });
   assert.equal(response.status, 201);
   return response.json();
@@ -466,6 +467,131 @@ test('playing rooms emit periodic playback.sync drift hints without changing epo
     assert.equal(sync.seq, state.seq);
   } finally {
     if (ws) await closeWs(ws);
+    await closeServer(server);
+  }
+});
+
+test('guest rider PTT uses a single server-authoritative talk floor and room-scoped signaling', async () => {
+  const { server, httpBase, wsBase } = await openServer();
+  let hostWs;
+  let riderWs;
+  try {
+    const created = await createRoom(httpBase, 'PTT Ride');
+    const joinedRes = await fetch(`${httpBase}/v1/rooms/${created.room.joinCode}/join`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Guest Rider' })
+    });
+    assert.equal(joinedRes.status, 200);
+    const joined = await joinedRes.json();
+
+    hostWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    riderWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await Promise.all([onceOpen(hostWs), onceOpen(riderWs)]);
+    const hostAuth = nextJson(hostWs, (m) => m.type === 'auth.ok');
+    const riderAuth = nextJson(riderWs, (m) => m.type === 'auth.ok');
+    hostWs.send(JSON.stringify({ type: 'auth', token: created.token }));
+    riderWs.send(JSON.stringify({ type: 'auth', token: joined.token }));
+    await Promise.all([hostAuth, riderAuth]);
+
+    const hostJoined = nextJson(hostWs, (m) => m.type === 'voice.joined');
+    hostWs.send(JSON.stringify({ type: 'voice.join' }));
+    await hostJoined;
+    const peerJoined = nextJson(hostWs, (m) => m.type === 'voice.peer.joined' && m.member?.id === joined.member.id);
+    const riderJoined = nextJson(riderWs, (m) => m.type === 'voice.joined');
+    riderWs.send(JSON.stringify({ type: 'voice.join' }));
+    await Promise.all([peerJoined, riderJoined]);
+
+    const riderFloor = nextJson(riderWs, (m) => m.type === 'voice.floor' && m.memberId === joined.member.id);
+    riderWs.send(JSON.stringify({ type: 'voice.talk.start' }));
+    await riderFloor;
+
+    const denied = nextJson(hostWs, (m) => m.type === 'voice.floor.denied');
+    hostWs.send(JSON.stringify({ type: 'voice.talk.start' }));
+    assert.equal((await denied).memberId, joined.member.id);
+
+    const released = nextJson(hostWs, (m) => m.type === 'voice.floor' && m.memberId === null);
+    riderWs.send(JSON.stringify({ type: 'voice.talk.stop' }));
+    await released;
+
+    const signal = nextJson(hostWs, (m) => m.type === 'voice.signal' && m.fromMemberId === joined.member.id);
+    riderWs.send(JSON.stringify({
+      type: 'voice.signal', toMemberId: created.member.id,
+      description: { type: 'offer', sdp: 'v=0\\r\\n' }
+    }));
+    assert.equal((await signal).description.type, 'offer');
+  } finally {
+    if (hostWs) await closeWs(hostWs);
+    if (riderWs) await closeWs(riderWs);
+    await closeServer(server);
+  }
+});
+
+test('signed-in host can lock new joins and end the Ryde for connected riders', async () => {
+  const { server, httpBase, wsBase } = await openServer();
+  let hostWs;
+  try {
+    const created = await createRoom(httpBase, 'Host Control Ride');
+    hostWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await onceOpen(hostWs);
+    const auth = nextJson(hostWs, (m) => m.type === 'auth.ok');
+    hostWs.send(JSON.stringify({ type: 'auth', token: created.token }));
+    await auth;
+
+    const locked = nextJson(hostWs, (m) => m.type === 'room.locked' && m.locked === true);
+    hostWs.send(JSON.stringify({ type: 'room.lock.set', locked: true }));
+    await locked;
+    const blockedJoin = await fetch(`${httpBase}/v1/rooms/${created.room.joinCode}/join`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Late Rider' })
+    });
+    assert.equal(blockedJoin.status, 423);
+
+    const ended = nextJson(hostWs, (m) => m.type === 'room.ended');
+    const closed = onceClose(hostWs);
+    hostWs.send(JSON.stringify({ type: 'room.end' }));
+    await ended;
+    assert.equal((await closed).code, 4011);
+    assert.equal((await fetch(`${httpBase}/v1/rooms/${created.room.id}`)).status, 404);
+  } finally {
+    if (hostWs) await closeWs(hostWs);
+    await closeServer(server);
+  }
+});
+
+test('guest room membership can mint only a current-track shared media session', async () => {
+  const { server, httpBase, wsBase } = await openServer();
+  let hostWs;
+  try {
+    const created = await createRoom(httpBase, 'Guest Music Ride');
+    const joinedRes = await fetch(`${httpBase}/v1/rooms/${created.room.joinCode}/join`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Music Guest' })
+    });
+    const joined = await joinedRes.json();
+
+    const before = await fetch(`${httpBase}/v1/echoverse/room-media-session`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roomToken: joined.token })
+    });
+    assert.equal(before.status, 409);
+
+    hostWs = new WebSocket(`${wsBase}/v1/realtime?room=${created.room.id}`);
+    await onceOpen(hostWs);
+    const auth = nextJson(hostWs, (m) => m.type === 'auth.ok');
+    hostWs.send(JSON.stringify({ type: 'auth', token: created.token }));
+    await auth;
+    const selected = nextJson(hostWs, (m) => m.type === 'playback.state' && m.playback?.trackId === 'track_guest_shared');
+    hostWs.send(JSON.stringify({ type: 'playback.select', expectedEpoch: 0, trackId: 'track_guest_shared', autoplay: true }));
+    await selected;
+
+    const granted = await fetch(`${httpBase}/v1/echoverse/room-media-session`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roomToken: joined.token })
+    });
+    assert.equal(granted.status, 200);
+    const body = await granted.json();
+    assert.equal(body.trackId, 'track_guest_shared');
+    assert.equal(body.scope, 'current-room-track');
+    assert.equal(body.libraryGranted, false);
+    assert.match(granted.headers.get('set-cookie') || '', /rydesync_media=/);
+    assert.match(granted.headers.get('set-cookie') || '', /HttpOnly/);
+  } finally {
+    if (hostWs) await closeWs(hostWs);
     await closeServer(server);
   }
 });

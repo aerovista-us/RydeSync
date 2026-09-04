@@ -1,61 +1,167 @@
 # RydeSync — Global Foundation
 
-Global-first RydeSync foundation. Public guest ride rooms work without Tailscale or login. AeroVista Identity is the strategic account authority, but remains isolated behind an adapter while the production identity contract is stabilized. EchoVerse access is an authenticated capability and the canonical private Library API is never exposed directly to clients.
+RydeSync is a public ride-room product for small crews: frictionless guest joining, authenticated hosting, room-scoped presence/location, WebRTC push-to-talk, and near-synchronized EchoVerse playback. The public app does not require Tailscale. AeroVista Identity/AVCC is the authority for account identity and capabilities; EchoVerse remains behind RydeSync's private server boundary.
+
+## Current milestone — 3.0.0-alpha.7
+
+Alpha.7 is the member-entry + PTT parity build.
+
+### Entry and permissions
+
+- **Guest:** `Join Ryde` + `Sign In`; no `Start Ryde`.
+- **Signed-in member:** `Start Ryde` + `Join Ryde`.
+- **Guest room member:** presence, opt-in location, crew map, permitted PTT, and current shared track only.
+- **Signed-in host/co-host:** shared soundtrack mutation by room role.
+- **EchoVerse library:** requires the member's own live `echoverse.library.listen` AVCC capability.
+
+Authentication, capability authorization, room membership, and room role are separate boundaries. Staff/member labels do not automatically grant EchoVerse.
+
+## Current production identity contract
+
+The older `AV_HANDOFF_EXCHANGE_URL=<guess>` configuration is obsolete. Alpha.7 uses the AeroCore app adapter and canonical Identity Gateway broker routes.
+
+```env
+AV_IDENTITY_MODE=optional
+AV_IDENTITY_APP_ID=rydesync
+AV_ACCOUNT_LOGIN_URL=https://account.aerocoreos.com/login
+AV_IDENTITY_GATEWAY_ORIGIN=https://identity-api.aerovista.us
+AV_IDENTITY_SERVICE_SECRET=<server-only secret>
+AV_BROWSER_SESSION_TTL_SECONDS=900
+```
+
+Current server-side broker calls:
+
+```text
+POST /v1/handoff/exchange
+POST /v1/session/resolve
+POST /v1/session/revoke
+POST /v1/authorization/check
+```
+
+Browser handoff is one-time code + state only. RydeSync exchanges the code server-side using HMAC service authentication and creates an encrypted HttpOnly `__session`. No Firebase/AVCC/service token belongs in the redirect URL.
+
+Canonical production Identity Gateway source is **not** the standalone `identity-gateway` repo. It is:
+
+```text
+aerovista-us/ACOS
+branch: main
+path: services/identity-gateway
+live: /srv/ACOS/services/identity-gateway
+public: https://identity-api.aerovista.us
+```
+
+See `docs/IDENTITY_STACK_SCHEMATIC.md` and `docs/SOURCE_AND_PRODUCTION_MAP.md`.
+
+## AeroCore app adapter
+
+Current RydeSync bridge:
+
+```text
+apps/api/lib/aerocore-app-adapter.js
+```
+
+Shared TypeScript package incubation:
+
+```text
+aerovista-us/ACOS
+branch: feat/aerocore-app-adapter-v0
+path: packages/aerocore-app-adapter
+```
+
+The adapter owns Account login URL construction, handoff exchange, session resolve/revoke, live capability checks, signed service calls, timeout/error normalization, and the HMAC contract. See `docs/AEROCORE_APP_ADAPTER_SCHEMATIC.md`.
+
+## Push-to-talk
+
+PTT signaling travels over `/v1/realtime`; microphone audio travels peer-to-peer/relay over WebRTC. Cloudflare Tunnel is not TURN.
+
+Current observed production state:
+
+```text
+PUSH TO TALK
+Ready
+TURN not configured · same-network voice may work
+```
+
+Current expected voice configuration shape:
+
+```env
+VOICE_ENABLED=true
+VOICE_MAX_PEERS=12
+STUN_URLS=stun:stun.l.google.com:19302
+TURN_URLS=
+TURN_USERNAME=
+TURN_CREDENTIAL=
+```
+
+Do not call independent-cellular PTT production-ready until TURN is configured and the two-phone field test in `docs/VOICE_DEPLOYMENT.md` passes.
+
+## EchoVerse
+
+Canonical private upstream:
+
+```text
+http://echoverse-library-api:5304
+```
+
+Public consumers use only RydeSync:
+
+- `GET /v1/echoverse/catalog` — signed-in + live `echoverse.library.listen`.
+- `GET /v1/echoverse/audio/{track_id}` — authorized member or room-current-track guest grant.
+- `GET /v1/echoverse/file/{path}` — full authorized member only.
+
+RydeSync synchronizes playback state, not audio bytes. Each client independently streams the selected track.
+
+Current observed Library UI:
+
+```text
+Your account does not currently have EchoVerse Library access.
+```
+
+That is an authorization result when an authenticated identity lacks the explicit capability; it is not, by itself, evidence of login failure.
+
+## Realtime/privacy invariants
+
+- Room tokens are sent after WebSocket open, never in invite/WS URLs.
+- Location is explicit opt-in and memory-only; it clears on stop/disconnect/staleness/expiry.
+- Microphone is explicit opt-in; audio is never carried/stored as WebSocket room payload.
+- Guests never inherit a host's broader EchoVerse entitlement.
+- Hosting and playback mutation are enforced server-side.
+- Active room state remains process-memory in Alpha.7; restart ends active Rydes.
+
+## Tests
+
+```bash
+npm test
+```
+
+Current Alpha.7 repository suite: **69/69 passing**, plus production Docker Compose validation in the PR workflow. The named synthetic identity matrix covers staff/member allow/deny, guests, revocation, stale authorization, expired/unknown credentials, room boundaries, and TURN/STUN readiness.
 
 ## Run
 
-Node 22+ only. No runtime npm packages are required.
+Node 22+:
 
 ```bash
 cp .env.example .env
-# export values from .env using your normal runtime/deploy tooling
 npm test
 npm start
 ```
 
-Open `http://localhost:9000`.
+Development default: `http://localhost:9000`.
 
-## Current milestone — 3.0.0-alpha.5
+## Deployment/source truth
 
-- guest Start Ride / Join Ride
-- short-lived HMAC-signed room membership tokens
-- AV Identity adapter with safe `optional` mode
-- fail-closed `echoverse.library.listen` entitlement boundary
-- authenticated WebSocket room plane at `/v1/realtime`
-- live online/offline presence and authoritative room snapshots
-- reconnect/resume using the same room token and last server sequence
-- explicit opt-in live location with server + client battery/data throttling
-- immediate coordinate clearing on stop, disconnect, stale sample, or room expiry
-- **interactive crew map** with geographic tiles, pan/zoom, fit-crew, accuracy rings, heading, speed, self-marker, and stale-state treatment
-- **canonical EchoVerse catalog proxy** at `/v1/echoverse/catalog`
-- protected byte-range audio proxy at `/v1/echoverse/audio/{track_id}` for Android/Media3 and future browser-native sessions
-- protected private artwork/file proxy at `/v1/echoverse/file/{path}`
-- **server-authoritative shared soundtrack state** with host/co-host controls, per-room epochs, play/pause/seek/clear, reconnect snapshots, and periodic drift hints
-- client room-clock estimation through `presence.ping/pong`
-- portable soft-drift/hard-drift correction policy (`none` → temporary 0.97/1.03 rate nudge → hard seek)
-- browser shell sharing the same `/v1` + realtime contract intended for Android
+Production and repository synchronization are not the same operation. The deployed Alpha.7 artifact is pinned to release SHA `1be4b5e33c77c32014b1f9963315a3219f45d778`; later Alpha.7 commits before this documentation pass are tests/docs and do not change runtime application code. Do not claim a redeploy solely because `main`/docs advance.
 
-Live location is intentionally ephemeral: it exists only in realtime room state and is not copied into room/member records or durable history.
+Operational deployment ownership is `aerovista-us/nxcore` **master**. NXCore `main` and `master` have unrelated histories; do not merge/rebase them as a routine sync step.
 
-EchoVerse stays private upstream. The default server target is `http://echoverse-library-api:5304`; browsers receive only RydeSync `/v1/echoverse/*` URLs. The retired `echoverse-catalog:5300` service is not used.
+## Canonical documentation
 
-The current browser library UI intentionally browses the catalog without claiming browser audio playback is finished. Native clients can authorize range requests with the AV bearer flow today; browser `<audio>` cannot attach that bearer header, so browser playback waits for the stable AV Identity browser-session/cookie contract rather than placing identity credentials in media URLs.
-
-The WebSocket room token is sent only after the socket opens. It is never placed in the WebSocket URL, invite URL, query string, or logs by design.
-
-See `docs/ARCHITECTURE.md` and `docs/IDENTITY_INTEGRATION.md`.
-
-
-## Shared soundtrack model
-
-RydeSync synchronizes **control state, not audio bytes**. A host or co-host selects an opaque EchoVerse `track_id`; the room broadcasts that ID plus status, anchor position, server timestamp and a monotonically increasing playback epoch. Each rider must independently pass `echoverse.library.listen` before resolving metadata or media.
-
-The browser estimates server clock offset with `presence.ping/pong`. While a track is playing, the server emits periodic `playback.sync` hints without advancing the room epoch. A playback client compares its local media position with the projected room target: drift below the soft threshold is ignored, medium drift uses a bounded temporary playback-rate nudge, and large drift hard-seeks. The current browser still does not claim authenticated `<audio>` playback until the AV Identity browser-session transport is stable; Android/Media3 can apply the same timing contract to authorized range requests.
-
-## Map provider note
-
-The map renderer itself has no mapping SDK dependency. It consumes a configurable `{z}/{x}/{y}` raster tile template. The `.env.example` defaults to OpenStreetMap tiles for development/light testing. A production deployment should use an AeroVista-approved tile service and preserve the configured attribution.
-
-## Important deployment note
-
-In production, set a durable `ROOM_TOKEN_SECRET` with at least 32 random characters. The service refuses to start in production without it.
+- `docs/RYDESYNC_SCHEMATIC.md` — full application/runtime schematic.
+- `docs/IDENTITY_STACK_SCHEMATIC.md` — Account, SSO, Identity Gateway, AVCC and capability convergence.
+- `docs/AEROCORE_APP_ADAPTER_SCHEMATIC.md` — adapter methods/HMAC/server-browser boundary.
+- `docs/SOURCE_AND_PRODUCTION_MAP.md` — repos, branches, source paths, live paths, pins and reference mirrors.
+- `docs/ARCHITECTURE.md` — product architecture/invariants.
+- `docs/IDENTITY_INTEGRATION.md` — relying-party identity contract.
+- `docs/VOICE_DEPLOYMENT.md` — TURN/PTT deployment gate.
+- `docs/ALPHA7_DEPLOYMENT.md` — controlled NXCore release process.
+- `docs/SYNTHETIC_IDENTITY_ACCEPTANCE_MATRIX.md` — cross-layer synthetic test semantics.

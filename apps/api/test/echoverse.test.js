@@ -12,7 +12,7 @@ function baseConfig(upstreamUrl) {
     realtime: { authTimeoutMs: 5000, heartbeatMs: 60000, maxMessageBytes: 32768 },
     location: { minIntervalMs: 1000, staleAfterMs: 120000, maxClientAgeMs: 30000, maxFutureSkewMs: 10000, maxAccuracyMeters: 5000 },
     map: { tileUrlTemplate: '', attribution: '', attributionUrl: '', minZoom: 2, maxZoom: 18 },
-    echoverse: { libraryApiUrl: upstreamUrl, timeoutMs: 1000, serviceToken: '' }
+    echoverse: { libraryApiUrl: upstreamUrl, timeoutMs: 1000, serviceToken: '', mediaSessionTtlSeconds: 600 }
   };
 }
 
@@ -78,6 +78,26 @@ test('audio proxy forwards byte ranges only after capability authorization', asy
     });
     assert.equal(response.status, 206);
     assert.equal(response.headers.get('content-range'), 'bytes 0-3/10');
+    assert.equal(await response.text(), 'test');
+  });
+});
+
+
+test('browser media session converts AV authorization into an HttpOnly same-origin media grant', async () => {
+  await withServers(async ({ appUrl }) => {
+    const sessionRes = await fetch(`${appUrl}/v1/echoverse/media-session`, {
+      method: 'POST', headers: { authorization: 'Bearer test-user-token', 'content-type': 'application/json' }, body: '{}'
+    });
+    assert.equal(sessionRes.status, 200);
+    const cookie = sessionRes.headers.get('set-cookie');
+    assert.match(cookie, /rydesync_media=/);
+    assert.match(cookie, /HttpOnly/);
+    assert.equal(cookie.includes('test-user-token'), false);
+
+    const response = await fetch(`${appUrl}/v1/echoverse/audio/trk-1`, {
+      headers: { cookie: cookie.split(';')[0], range: 'bytes=0-3' }
+    });
+    assert.equal(response.status, 206);
     assert.equal(await response.text(), 'test');
   });
 });

@@ -1,0 +1,29 @@
+name: Alpha7 Adapter Contract
+
+on:
+  push:
+    branches:
+      - feat/alpha7-app-adapter-reference
+  pull_request:
+    branches:
+      - upgrade/alpha7-global-foundation
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test RydeSync
+        run: timeout 60s npm test
+      - name: Validate production compose
+        env:
+          RYDESYNC_ENV_FILE: .env.example
+        run: docker compose config >/dev/null

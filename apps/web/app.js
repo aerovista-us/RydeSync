@@ -1,11 +1,20 @@
 import { CrewMap } from '/map.js';
 import { playbackTargetMs as projectPlaybackTarget } from '/sync-core.js';
+import { SharedAudioEngine } from '/audio-engine.js';
+import { VoiceClient } from '/voice.js';
 const $ = (selector) => document.querySelector(selector);
 const result = $('#result');
 const realtimePanel = $('#realtimePanel');
 let bootstrap = null;
 let realtime = null;
 let crewMap = null;
+let audioEngine = null;
+let mediaSessionExpiresAt = null;
+let mediaSessionTrackId = null;
+let mediaSessionScope = null;
+let currentPrincipal = null;
+let voiceClient = null;
+let currentRoomLocked = false;
 const echoverseTrackIndex = new Map();
 const locationShare = {
   watchId: null,
@@ -41,12 +50,26 @@ async function refreshIdentity() {
   $('#realtimeMode').textContent = bootstrap.features.realtime ? 'LIVE' : 'OFF';
   $('#locationMode').textContent = bootstrap.features.liveLocation ? 'OPT-IN' : 'OFF';
   ensureCrewMap();
+  renderVoiceBootstrap();
   const session = await api('/v1/session');
+  currentPrincipal = session.principal;
   const pill = $('#identityPill');
   pill.classList.remove('connected', 'warn');
-  if (session.principal.authenticated) {
+  const signedIn = Boolean(session.principal.authenticated);
+  $('#createCard').classList.toggle('hidden', !signedIn);
+  $('#signInCard').classList.toggle('hidden', signedIn);
+  $('#memberCard').classList.toggle('hidden', !signedIn);
+  const signInButton = $('#signInButton');
+  if (signInButton) {
+    signInButton.href = bootstrap.identity.loginPath ? `${bootstrap.identity.loginPath}?next=${encodeURIComponent(location.pathname + location.search)}` : '#';
+    signInButton.classList.toggle('disabled-link', !bootstrap.identity.loginConfigured);
+  }
+  const hint = $('#signInHint');
+  if (hint && !bootstrap.identity.loginConfigured) hint.textContent = 'AeroVista sign-in needs the Access Convergence exchange URL configured on this deployment. Joining remains available.';
+  if (signedIn) {
     pill.textContent = session.principal.displayName || 'AeroVista Member';
     pill.classList.add('connected');
+    $('#memberWelcome').textContent = session.principal.displayName || 'AeroVista Member';
   } else if (session.principal.authState === 'unavailable') {
     pill.textContent = 'Identity unavailable · guest mode';
     pill.classList.add('warn');
@@ -54,9 +77,15 @@ async function refreshIdentity() {
     pill.textContent = 'Guest';
   }
   const ev = $('#echoverseStatus');
-  if (ev) ev.textContent = session.principal.authenticated
-    ? 'Signed in · library access depends on your AVCC capability grant.'
-    : 'Sign in with AeroVista Identity to access the private EchoVerse library.';
+  if (ev) ev.textContent = signedIn
+    ? 'Signed in · library access depends on your live AVCC capability grant.'
+    : "Sign in with AeroVista Identity to browse the private EchoVerse library. Guest riders can still hear the host's current shared track.";
+  const libraryButton = $('#echoverseLoad');
+  if (libraryButton) {
+    libraryButton.disabled = !signedIn;
+    libraryButton.textContent = signedIn ? 'Load library' : 'Sign in for library';
+  }
+  renderPlayback();
 }
 
 function sessionKey(roomId) {
@@ -228,8 +257,75 @@ function startLocationSharing() {
   });
 }
 
+async function openMemberMediaSession() {
+  const body = await api('/v1/echoverse/media-session', { method: 'POST', body: '{}' });
+  mediaSessionExpiresAt = body.expiresAt || null;
+  mediaSessionTrackId = null;
+  mediaSessionScope = 'library';
+  return body;
+}
+
+async function openRoomMediaSession(trackId = realtime?.playback?.trackId) {
+  if (!trackId || !realtime?.session?.token) return null;
+  const body = await api('/v1/echoverse/room-media-session', {
+    method: 'POST', body: JSON.stringify({ roomToken: realtime.session.token })
+  });
+  if (String(body.trackId) !== String(trackId)) throw new Error('Shared track changed while media access was opening');
+  mediaSessionExpiresAt = body.expiresAt || null;
+  mediaSessionTrackId = String(trackId);
+  mediaSessionScope = 'room-track';
+  return body;
+}
+
+async function ensurePlaybackMediaGrant(playback = realtime?.playback) {
+  if (!playback?.trackId) return null;
+  const expires = Date.parse(mediaSessionExpiresAt || '');
+  const fresh = Number.isFinite(expires) && expires - Date.now() > 90000;
+  if (fresh && (mediaSessionScope === 'library' || mediaSessionTrackId === String(playback.trackId))) return true;
+  if (currentPrincipal?.authenticated) {
+    try { await openMemberMediaSession(); return true; }
+    catch (error) {
+      if (!['capability_required', 'identity_unavailable', 'auth_required'].includes(error.body?.error?.code)) throw error;
+    }
+  }
+  await openRoomMediaSession(playback.trackId);
+  return true;
+}
+
+function ensureAudioEngine() {
+  if (audioEngine) return audioEngine;
+  const audio = $('#sharedAudio');
+  if (!audio) return null;
+  audioEngine = new SharedAudioEngine(audio, {
+    softDriftMs: bootstrap?.playback?.softDriftMs ?? 250,
+    hardDriftMs: bootstrap?.playback?.hardDriftMs ?? 1500,
+    onState: ({ state, driftMs, correction, error }) => {
+      const el = $('#audioClientStatus');
+      if (!el) return;
+      const labels = {
+        idle: 'READY · no shared track', muted: 'OFF · audio never starts automatically', ready: 'READY', locked: 'OFF · tap Listen with crew',
+        buffering: 'BUFFERING', playing: `PLAYING${Number.isFinite(driftMs) ? ` · drift ${Math.round(driftMs)}ms${correction && correction !== 'none' ? ` · ${correction}` : ''}` : ''}`,
+        paused: 'PAUSED', gesture_required: 'TAP LISTEN · browser blocked autoplay', error: `AUDIO ERROR · ${error || 'stream unavailable'}`
+      };
+      el.textContent = labels[state] || state.toUpperCase();
+      el.className = `playback-client-state ${['playing','ready'].includes(state) ? 'online' : ['locked','gesture_required','buffering'].includes(state) ? 'warn' : state === 'error' ? 'error' : ''}`;
+      const button = $('#audioListenToggle');
+      if (button) button.textContent = audioEngine?.armed ? 'Stop listening' : 'Listen with crew';
+    }
+  });
+  return audioEngine;
+}
+
+async function applyPlaybackToAudio(playback = realtime?.playback, { force = false } = {}) {
+  const engine = ensureAudioEngine();
+  if (!engine) return;
+  if (engine.armed && playback?.trackId) await ensurePlaybackMediaGrant(playback);
+  const serverNow = Date.now() + Number(realtime?.clockOffsetMs || 0);
+  await engine.apply(playback, serverNow, { force });
+}
+
 function isPlaybackController() {
-  return ['host', 'co_host'].includes(realtime?.session?.member?.role);
+  return Boolean(realtime?.session?.member?.identityId) && ['host', 'co_host'].includes(realtime?.session?.member?.role);
 }
 
 function formatTime(ms) {
@@ -295,9 +391,66 @@ function startClockSync() {
   realtime.pingTimer = setInterval(sendClockPing, 5000);
 }
 
+function sendRealtime(message) {
+  if (!realtime?.authenticated || realtime.ws?.readyState !== WebSocket.OPEN) return false;
+  realtime.ws.send(JSON.stringify(message));
+  return true;
+}
+
+function ensureVoiceClient() {
+  if (voiceClient) return voiceClient;
+  voiceClient = new VoiceClient({
+    iceServers: bootstrap?.voice?.iceServers || [],
+    send: sendRealtime,
+    onState: ({ state, detail, peerCount }) => {
+      const status = $('#voiceStatus');
+      const enable = $('#voiceEnable');
+      const talk = $('#talkButton');
+      const labels = {
+        off: 'Off · microphone never starts automatically', requesting: 'Requesting microphone permission…',
+        connecting: 'Connecting to crew voice…', reconnecting: 'Voice reconnecting…', ready: `Ready · ${peerCount || 0} voice peer${peerCount === 1 ? '' : 's'}`,
+        requesting_floor: 'Requesting talk channel…', talking: 'Transmitting to crew', listening: 'Crew member is talking', busy: 'Channel busy',
+        gesture_required: 'Tap Enable PTT again to unlock received audio', error: `Voice error · ${detail || 'request rejected'}`
+      };
+      status.textContent = labels[state] || state;
+      status.className = `voice-status ${['ready','talking','listening'].includes(state) ? 'online' : ['requesting','connecting','reconnecting','requesting_floor','busy','gesture_required'].includes(state) ? 'warn' : state === 'error' ? 'error' : ''}`;
+      enable.textContent = voiceClient?.enabled ? 'Disable PTT' : 'Enable PTT';
+      enable.classList.toggle('danger', Boolean(voiceClient?.enabled));
+      talk.disabled = !(voiceClient?.enabled && voiceClient?.joined);
+      $('#talkHint').textContent = talk.disabled ? 'Enable microphone first' : state === 'talking' ? 'Release to stop' : 'Press and hold';
+    },
+    onFloor: ({ memberId, member }) => {
+      const self = realtime?.session?.member?.id;
+      const speaker = $('#voiceSpeaker');
+      if (!memberId) speaker.textContent = 'Channel clear';
+      else if (memberId === self) speaker.textContent = 'You are talking';
+      else speaker.textContent = `${member?.displayName || memberName(memberId)} is talking`;
+      $('#talkButton').classList.toggle('talking', memberId === self);
+      $('#talkLabel').textContent = memberId === self ? 'TALKING' : 'HOLD TO TALK';
+    }
+  });
+  return voiceClient;
+}
+
+function renderVoiceBootstrap() {
+  const turn = $('#turnStatus');
+  if (!turn || !bootstrap?.voice) return;
+  turn.textContent = bootstrap.voice.turnConfigured ? 'TURN ready · cellular fallback configured' : 'TURN not configured · same-network voice may work';
+  turn.className = bootstrap.voice.turnConfigured ? 'turn-status online' : 'turn-status warn';
+  $('#voicePanel').classList.toggle('hidden', !bootstrap.voice.enabled);
+}
+
+function renderHostControls(room = null) {
+  const isHost = realtime?.session?.member?.role === 'host' && Boolean(realtime?.session?.member?.identityId);
+  $('#hostPanel').classList.toggle('hidden', !isHost);
+  if (room && typeof room.locked === 'boolean') currentRoomLocked = room.locked;
+  $('#roomLockToggle').textContent = currentRoomLocked ? 'Unlock Ryde' : 'Lock Ryde';
+}
+
 function stopRealtime() {
   if (!realtime) return;
   stopLocationSharing({ notifyServer: true });
+  voiceClient?.disable({ notify: true });
   realtime.manualClose = true;
   clearTimeout(realtime.reconnectTimer);
   clearInterval(realtime.pingTimer);
@@ -347,13 +500,17 @@ function connectRealtime(session) {
         renderRealtime({ label: message.resumed ? 'RESUMED' : 'LIVE', tone: 'online', seq: message.seq });
         startClockSync();
         if (locationShare.enabled && locationShare.latest) sendLatestLocation({ force: true });
+        if (voiceClient?.enabled) voiceClient.rejoin();
       } else if (message.type === 'room.snapshot') {
         realtime.members = Array.isArray(message.members) ? message.members : [];
         realtime.locations = new Map((Array.isArray(message.locations) ? message.locations : []).map((entry) => [entry.memberId, entry]));
         realtime.playback = message.playback || realtime.playback;
+        currentRoomLocked = Boolean(message.room?.locked);
         renderRealtime({ label: 'LIVE', tone: 'online', seq: message.seq, room: message.room, members: realtime.members });
+        renderHostControls(message.room);
         renderCrewMap({ autoFit: true });
         renderPlayback();
+        applyPlaybackToAudio(realtime.playback).catch(console.error);
       } else if (message.type === 'member.online' || message.type === 'member.offline') {
         const member = message.member;
         const index = realtime.members.findIndex((candidate) => candidate.id === member.id);
@@ -375,6 +532,7 @@ function connectRealtime(session) {
       } else if (message.type === 'playback.state' || message.type === 'playback.sync') {
         realtime.playback = message.playback || realtime.playback;
         renderPlayback(message);
+        applyPlaybackToAudio(realtime.playback).catch(console.error);
       } else if (message.type === 'playback.error') {
         const state = $('#sharedPlaybackState');
         if (state) {
@@ -385,6 +543,20 @@ function connectRealtime(session) {
           realtime.playback = message.playback;
           setTimeout(() => renderPlayback(), 1500);
         }
+      } else if (message.type.startsWith('voice.')) {
+        ensureVoiceClient().handle(message).catch((error) => {
+          $('#voiceStatus').textContent = `Voice error · ${error.message}`;
+          $('#voiceStatus').className = 'voice-status error';
+        });
+      } else if (message.type === 'room.locked') {
+        currentRoomLocked = Boolean(message.locked);
+        renderHostControls({ locked: currentRoomLocked });
+      } else if (message.type === 'room.ended') {
+        voiceClient?.disable({ notify: false });
+        stopLocationSharing({ notifyServer: false, label: 'Off · Ryde ended' });
+        renderRealtime({ label: 'RYDE ENDED', tone: 'error' });
+      } else if (message.type === 'room.error') {
+        show('Host control rejected', message.error || {}, true);
       } else if (message.type === 'location.member') {
         realtime.locations.set(message.location.memberId, message.location);
         renderLocations();
@@ -402,7 +574,8 @@ function connectRealtime(session) {
       if (!realtime || realtime.ws !== ws || realtime.manualClose) return;
       realtime.authenticated = false;
       clearInterval(realtime.pingTimer);
-      if ([4003, 4004, 4005, 4010].includes(event.code)) {
+      voiceClient?.realtimeDisconnected();
+      if ([4003, 4004, 4005, 4010, 4011].includes(event.code)) {
         stopLocationSharing({ notifyServer: false, label: 'Off · ride session ended' });
         renderRealtime({ label: 'SESSION ENDED', tone: 'error' });
         return;
@@ -455,6 +628,7 @@ async function loadEchoVerseCatalog() {
   button.disabled = true;
   status.textContent = 'Checking AeroVista access and loading the canonical catalog…';
   try {
+    await openMemberMediaSession();
     const body = await api('/v1/echoverse/catalog');
     renderEchoVerseTracks(body);
     status.textContent = `${body.total ?? body.tracks?.length ?? 0} track${(body.total ?? body.tracks?.length ?? 0) === 1 ? '' : 's'} available through RydeSync.`;
@@ -486,6 +660,72 @@ $('#echoverseTracks').addEventListener('click', (event) => {
   sendPlayback('playback.select', { trackId: button.dataset.trackId, autoplay: true, positionMs: 0 });
 });
 
+async function renewMediaSessionIfNeeded() {
+  if (!audioEngine?.armed || !mediaSessionExpiresAt) return;
+  const expires = Date.parse(mediaSessionExpiresAt);
+  if (!Number.isFinite(expires) || expires - Date.now() > 120000) return;
+  try { await ensurePlaybackMediaGrant(realtime?.playback); }
+  catch (error) {
+    const status = $('#audioClientStatus');
+    if (status) {
+      status.textContent = 'MEDIA AUTH REFRESH FAILED · current stream may continue';
+      status.className = 'playback-client-state warn';
+    }
+  }
+}
+
+
+const localVolume = $('#audioVolume');
+const localMute = $('#audioMuteToggle');
+function syncLocalAudioControls() {
+  const audio = $('#sharedAudio');
+  if (!audio) return;
+  if (localVolume) localVolume.value = String(audio.volume);
+  if (localMute) localMute.textContent = audio.muted ? 'Unmute' : 'Mute';
+}
+localVolume?.addEventListener('input', () => {
+  const audio = $('#sharedAudio');
+  if (!audio) return;
+  audio.volume = Math.max(0, Math.min(1, Number(localVolume.value)));
+  if (audio.volume > 0 && audio.muted) audio.muted = false;
+  syncLocalAudioControls();
+});
+localMute?.addEventListener('click', () => {
+  const audio = $('#sharedAudio');
+  if (!audio) return;
+  audio.muted = !audio.muted;
+  syncLocalAudioControls();
+});
+syncLocalAudioControls();
+
+$('#audioListenToggle').addEventListener('click', async () => {
+  const engine = ensureAudioEngine();
+  if (!engine) return;
+  if (engine.armed) {
+    engine.setArmed(false);
+    mediaSessionExpiresAt = null;
+    mediaSessionTrackId = null;
+    mediaSessionScope = null;
+    api('/v1/echoverse/media-session', { method: 'DELETE' }).catch(() => {});
+    return;
+  }
+  const status = $('#audioClientStatus');
+  try {
+    status.textContent = currentPrincipal?.authenticated ? 'OPENING ECHOVERSE MEDIA…' : 'OPENING SHARED TRACK…';
+    status.className = 'playback-client-state warn';
+    engine.setArmed(true);
+    if (realtime?.playback?.trackId) await ensurePlaybackMediaGrant(realtime.playback);
+    await applyPlaybackToAudio(realtime?.playback, { force: true });
+  } catch (error) {
+    const code = error.body?.error?.code;
+    status.textContent = code === 'auth_required' ? 'SIGN IN REQUIRED · AeroVista Identity'
+      : code === 'capability_required' ? 'ACCESS REQUIRED · EchoVerse Library'
+        : `MEDIA SESSION FAILED · ${error.body?.error?.message || error.message}`;
+    status.className = 'playback-client-state error';
+    engine.setArmed(false);
+  }
+});
+
 $('#createForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -505,7 +745,8 @@ $('#createForm').addEventListener('submit', async (event) => {
     });
     connectRealtime(session);
   } catch (error) {
-    show('Could not create ride', error.body || { message: error.message }, true);
+    if (error.body?.error?.code === 'auth_required') show('Sign in to start a Ryde', { action: 'Use Sign In, then Start Ryde becomes available.' }, true);
+    else show('Could not create ride', error.body || { message: error.message }, true);
   }
 });
 
@@ -525,6 +766,46 @@ $('#joinForm').addEventListener('submit', async (event) => {
   } catch (error) {
     show('Could not join ride', error.body || { message: error.message }, true);
   }
+});
+
+$('#voiceEnable').addEventListener('click', async () => {
+  const voice = ensureVoiceClient();
+  if (voice.enabled) return voice.disable({ notify: true });
+  if (!realtime?.authenticated) return show('Join a Ryde before enabling PTT', null, true);
+  try { await voice.enable(realtime.session.member.id); }
+  catch (error) {
+    $('#voiceStatus').textContent = `Microphone unavailable · ${error.message}`;
+    $('#voiceStatus').className = 'voice-status error';
+  }
+});
+
+const talkButton = $('#talkButton');
+function startTalk(event) {
+  event?.preventDefault();
+  if (talkButton.disabled) return;
+  try { talkButton.setPointerCapture?.(event.pointerId); } catch {}
+  ensureVoiceClient().pressStart();
+}
+function stopTalk(event) {
+  event?.preventDefault();
+  voiceClient?.pressStop();
+}
+talkButton.addEventListener('pointerdown', startTalk);
+talkButton.addEventListener('pointerup', stopTalk);
+talkButton.addEventListener('pointercancel', stopTalk);
+talkButton.addEventListener('contextmenu', (event) => event.preventDefault());
+window.addEventListener('blur', () => voiceClient?.pressStop());
+document.addEventListener('keydown', (event) => {
+  if (event.code !== 'Space' || event.repeat || ['INPUT','SELECT','TEXTAREA','BUTTON'].includes(document.activeElement?.tagName)) return;
+  if (!talkButton.disabled) { event.preventDefault(); ensureVoiceClient().pressStart(); }
+});
+document.addEventListener('keyup', (event) => {
+  if (event.code === 'Space' && voiceClient?.pressActive) { event.preventDefault(); voiceClient.pressStop(); }
+});
+
+$('#roomLockToggle').addEventListener('click', () => sendRealtime({ type: 'room.lock.set', locked: !currentRoomLocked }));
+$('#roomEnd').addEventListener('click', () => {
+  if (confirm('End this Ryde for everyone?')) sendRealtime({ type: 'room.end' });
 });
 
 $('#rtRefresh').addEventListener('click', () => {
@@ -556,6 +837,8 @@ if (incomingRoom) {
 }
 
 setInterval(() => { if (realtime?.playback?.trackId) renderPlayback(); }, 500);
+setInterval(() => { if (audioEngine?.armed && realtime?.playback?.trackId) applyPlaybackToAudio(realtime.playback).catch(console.error); }, 2000);
+setInterval(() => { renewMediaSessionIfNeeded().catch(console.error); }, 60000);
 
 refreshIdentity().catch((error) => {
   $('#identityPill').textContent = 'Identity status unavailable';

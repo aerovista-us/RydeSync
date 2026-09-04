@@ -10,6 +10,12 @@ function intEnv(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {})
   return value;
 }
 
+function csvEnv(name, fallback = []) {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  return raw.split(',').map((value) => value.trim()).filter(Boolean);
+}
+
 function identityMode(raw = 'optional') {
   if (!['off', 'optional', 'required'].includes(raw)) {
     throw new Error('AV_IDENTITY_MODE must be off, optional, or required');
@@ -42,11 +48,35 @@ export function loadConfig() {
     memberTokenTtlSeconds: intEnv('MEMBER_TOKEN_TTL_SECONDS', 28_800, { min: 60, max: 604_800 }),
     identity: Object.freeze({
       mode: identityMode(process.env.AV_IDENTITY_MODE),
+      // Legacy bearer-token verifier remains available for non-browser clients.
       baseUrl: (process.env.AV_IDENTITY_BASE_URL || '').replace(/\/$/, ''),
       verifyPath: process.env.AV_IDENTITY_VERIFY_PATH || '',
       timeoutMs: intEnv('AV_IDENTITY_TIMEOUT_MS', 2500, { min: 250, max: 15_000 }),
       appId: process.env.AV_IDENTITY_APP_ID || 'rydesync',
-      loginUrl: process.env.AV_ACCOUNT_LOGIN_URL || ''
+
+      // AeroCore App Adapter / Access Convergence v1. Parameter names are
+      // intentionally fixed by the platform contract rather than configurable
+      // per-app: client_id, return_to, state and code.
+      loginUrl: process.env.AV_ACCOUNT_LOGIN_URL || 'https://account.aerocoreos.com/login',
+      identityGatewayOrigin: (process.env.AV_IDENTITY_GATEWAY_ORIGIN || 'https://identity-api.aerovista.us').replace(/\/$/, ''),
+      serviceSecret: process.env.AV_IDENTITY_SERVICE_SECRET || '',
+      capabilitySnapshot: Object.freeze(csvEnv('AV_IDENTITY_CAPABILITIES', ['echoverse.library.listen'])),
+      browserSessionTtlSeconds: intEnv('AV_BROWSER_SESSION_TTL_SECONDS', 900, { min: 60, max: 86400 })
+    }),
+    voice: Object.freeze({
+      enabled: (process.env.VOICE_ENABLED || 'true').toLowerCase() !== 'false',
+      maxPeers: intEnv('VOICE_MAX_PEERS', 12, { min: 2, max: 24 }),
+      stunUrls: csvEnv('STUN_URLS', ['stun:stun.l.google.com:19302']),
+      turnUrls: csvEnv('TURN_URLS'),
+      // Preferred production mode. RydeSync signs room-bounded TURN REST
+      // credentials only after a valid room token is presented.
+      turnSharedSecret: process.env.TURN_SHARED_SECRET || '',
+      turnRealm: process.env.TURN_REALM || 'turn.rydesync.aerovista.us',
+      turnCredentialTtlSeconds: intEnv('TURN_CREDENTIAL_TTL_SECONDS', 21_600, { min: 300, max: 86_400 }),
+      // Legacy static credentials remain accepted for controlled environments,
+      // but are never emitted by the public bootstrap endpoint.
+      turnUsername: process.env.TURN_USERNAME || '',
+      turnCredential: process.env.TURN_CREDENTIAL || ''
     }),
     realtime: Object.freeze({
       authTimeoutMs: intEnv('REALTIME_AUTH_TIMEOUT_MS', 10_000, { min: 1_000, max: 60_000 }),
@@ -61,9 +91,9 @@ export function loadConfig() {
       maxZoom: intEnv('MAP_MAX_ZOOM', 18, { min: 1, max: 22 })
     }),
     playback: Object.freeze({
-      syncIntervalMs: intEnv('PLAYBACK_SYNC_INTERVAL_MS', 10000, { min: 3000, max: 60000 }),
-      softDriftMs: intEnv('PLAYBACK_SOFT_DRIFT_MS', 250, { min: 50, max: 2000 }),
-      hardDriftMs: intEnv('PLAYBACK_HARD_DRIFT_MS', 1500, { min: 250, max: 10000 })
+      syncIntervalMs: intEnv('PLAYBACK_SYNC_INTERVAL_MS', 3000, { min: 1000, max: 60000 }),
+      softDriftMs: intEnv('PLAYBACK_SOFT_DRIFT_MS', 150, { min: 50, max: 2000 }),
+      hardDriftMs: intEnv('PLAYBACK_HARD_DRIFT_MS', 750, { min: 250, max: 10000 })
     }),
     location: Object.freeze({
       minIntervalMs: intEnv('LOCATION_MIN_INTERVAL_MS', 5000, { min: 1000, max: 60000 }),
@@ -75,7 +105,8 @@ export function loadConfig() {
     echoverse: Object.freeze({
       libraryApiUrl: process.env.ECHOVERSE_LIBRARY_API_URL || 'http://echoverse-library-api:5304',
       timeoutMs: intEnv('ECHOVERSE_TIMEOUT_MS', 5000, { min: 500, max: 30000 }),
-      serviceToken: process.env.ECHOVERSE_UPSTREAM_BEARER_TOKEN || ''
+      serviceToken: process.env.ECHOVERSE_UPSTREAM_BEARER_TOKEN || '',
+      mediaSessionTtlSeconds: intEnv('ECHOVERSE_MEDIA_SESSION_TTL_SECONDS', 600, { min: 60, max: 3600 })
     })
   });
 }

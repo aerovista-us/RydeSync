@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#071014" />
   <title>RydeSync</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/product-ui.css" />
 </head>
 <body>
   <main class="shell">
@@ -18,119 +19,276 @@
       <div id="identityPill" class="pill">Checking identity…</div>
     </header>
 
-    <section class="hero">
-      <div>
-        <div class="eyebrow">GLOBAL FOUNDATION // ALPHA</div>
-        <h2>One crew. One room. No network gymnastics.</h2>
-        <p>Public ride rooms stay frictionless. AeroVista Identity adds persistent access without becoming a single point of failure for guest rides.</p>
-      </div>
-      <div class="signal" aria-hidden="true">
-        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core">R</div>
-      </div>
-    </section>
+    <nav class="app-nav" aria-label="RydeSync sections">
+      <button type="button" class="app-nav-item active" data-view-target="access" aria-current="page"><span>01</span>Access</button>
+      <button type="button" class="app-nav-item" data-view-target="ride"><span>02</span>Ryde</button>
+      <button type="button" class="app-nav-item" data-view-target="room"><span>03</span>Room + Map</button>
+      <button type="button" class="app-nav-item" data-view-target="music"><span>04</span>Music</button>
+    </nav>
 
-    <section class="grid">
-      <article class="card">
-        <div class="card-kicker">HOST</div>
-        <h3>Start a Ride</h3>
-        <form id="createForm">
-          <label>Ride name<input name="name" placeholder="Lake Loop" required minlength="2" maxlength="80" /></label>
-          <label>Mode<select name="mode"><option value="group_ride">Group Ride</option><option value="listening_party">Listening Party</option><option value="classroom">Classroom</option><option value="band_practice">Band Practice</option><option value="campaign">Campaign</option></select></label>
-          <button type="submit">Start Ride</button>
-        </form>
-      </article>
-
-      <article class="card">
-        <div class="card-kicker">CREW</div>
-        <h3>Join a Ride</h3>
-        <form id="joinForm">
-          <label>Room ID or code<input name="room" placeholder="ABCD2345" required /></label>
-          <label>Your name<input name="displayName" placeholder="Guest Rider" maxlength="60" /></label>
-          <button type="submit" class="secondary">Join Ride</button>
-        </form>
-      </article>
-    </section>
-
-    <section id="result" class="result hidden"></section>
-
-    <section id="realtimePanel" class="realtime-panel hidden">
-      <div class="rt-head">
+    <section id="accessView" class="app-view" data-view="access">
+      <section class="hero">
         <div>
-          <div class="card-kicker">REALTIME ROOM</div>
-          <h3 id="rtRoom">Ride room</h3>
+          <div class="eyebrow">GLOBAL FOUNDATION // ALPHA</div>
+          <h2>One crew. One room. No network gymnastics.</h2>
+          <p>Public ride rooms stay frictionless. AeroVista Identity adds persistent access without becoming a single point of failure for guest rides.</p>
         </div>
-        <div class="rt-meta">
-          <span id="rtStatus" class="rt-status">CONNECTING</span>
-          <span>SEQ <strong id="rtSeq">—</strong></span>
-          <button id="rtRefresh" type="button" class="mini">Refresh</button>
+        <div class="signal" aria-hidden="true">
+          <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core">R</div>
         </div>
+      </section>
+
+      <div class="page-heading compact-heading">
+        <div>
+          <div class="eyebrow">ACCESS</div>
+          <h2>Sign in or join the crew.</h2>
+        </div>
+        <p>Members can host and control the shared soundtrack. Guests can jump straight into an existing Ryde.</p>
       </div>
-      <ul id="rtMembers" class="member-list"><li class="muted">Waiting for presence snapshot…</li></ul>
 
-      <div class="location-panel">
-        <div class="location-head">
-          <div>
-            <div class="card-kicker">LIVE LOCATION</div>
-            <p id="locationStatus" class="location-status">Off · never starts automatically</p>
-          </div>
-          <button id="locationToggle" type="button" class="mini location-toggle">Share my location</button>
+      <section class="grid entry-grid access-grid">
+        <article id="joinCard" class="card">
+          <div class="card-kicker">CREW</div>
+          <h3>Join a Ryde</h3>
+          <form id="joinForm">
+            <label>Room ID or code<input name="room" placeholder="ABCD2345" required /></label>
+            <label>Your name<input name="displayName" placeholder="Guest Rider" maxlength="60" /></label>
+            <button type="submit" class="secondary">Join Ryde</button>
+          </form>
+        </article>
+
+        <article id="signInCard" class="card sign-in-card">
+          <div class="card-kicker">AEROVISTA MEMBER</div>
+          <h3>Sign In</h3>
+          <p>Start Rydes, control the shared soundtrack, keep your identity across devices, and unlock member features.</p>
+          <a id="signInButton" class="button-link" href="/auth/login">Sign in with AeroVista</a>
+          <small id="signInHint">Joining a Ryde never requires an account.</small>
+        </article>
+
+        <article id="memberCard" class="card member-card hidden">
+          <div class="card-kicker">SIGNED IN</div>
+          <h3 id="memberWelcome">AeroVista Member</h3>
+          <p>Hosting and shared music controls are unlocked. Crew/history features will attach to this identity without changing guest access.</p>
+          <a id="signOutButton" class="button-link secondary-link" href="/auth/logout">Sign out</a>
+        </article>
+      </section>
+    </section>
+
+    <section id="rideView" class="app-view" data-view="ride" hidden>
+      <div class="page-heading">
+        <div>
+          <div class="eyebrow">RYDE</div>
+          <h2>Start it. Share it. Bring the crew in.</h2>
         </div>
-        <p class="privacy-note">Visible only to authenticated members of this ride. Coordinates are ephemeral and are cleared when you stop, disconnect, go stale, or the room expires.</p>
+        <p>This is the handoff point between access and the live room. Create a Ryde here, then move into Room + Map or Music.</p>
+      </div>
 
-        <div class="crew-map-shell">
-          <div class="map-toolbar">
+      <section class="grid entry-grid ride-grid">
+        <article id="createCard" class="card hidden">
+          <div class="card-kicker">MEMBER HOST</div>
+          <h3>Start a Ryde</h3>
+          <form id="createForm">
+            <label>Ride name<input name="name" placeholder="Lake Loop" required minlength="2" maxlength="80" /></label>
+            <label>Mode<select name="mode"><option value="group_ride">Group Ride</option><option value="listening_party">Listening Party</option><option value="classroom">Classroom</option><option value="band_practice">Band Practice</option><option value="campaign">Campaign</option></select></label>
+            <button type="submit">Start Ryde</button>
+          </form>
+        </article>
+
+        <article id="rideEmpty" class="card ride-empty-card">
+          <div class="card-kicker">CURRENT RYDE</div>
+          <h3>Ready when you are.</h3>
+          <p>Start a new Ryde as a signed-in member, or join one from the Access page. The room invite and connection details will appear here.</p>
+          <button type="button" class="secondary" data-view-jump="access">Back to Access</button>
+        </article>
+      </section>
+
+      <section id="result" class="result hidden"></section>
+      <div id="rideActions" class="ride-actions hidden">
+        <button type="button" data-view-jump="room">Open Room + Map</button>
+        <button type="button" class="secondary" data-view-jump="music">Open Music</button>
+      </div>
+    </section>
+
+    <section id="roomView" class="app-view" data-view="room" hidden>
+      <div class="page-heading">
+        <div>
+          <div class="eyebrow">LIVE RYDE</div>
+          <h2>Realtime room + live location.</h2>
+        </div>
+        <p>Presence, push-to-talk, host controls, and the live crew map stay together on one focused operational page.</p>
+      </div>
+
+      <section id="realtimePanel" class="realtime-panel hidden">
+        <div class="rt-head">
+          <div>
+            <div class="card-kicker">REALTIME ROOM</div>
+            <h3 id="rtRoom">Ride room</h3>
+          </div>
+          <div class="rt-meta">
+            <span id="rtStatus" class="rt-status">CONNECTING</span>
+            <span>SEQ <strong id="rtSeq">—</strong></span>
+            <button id="rtRefresh" type="button" class="mini">Refresh</button>
+          </div>
+        </div>
+        <ul id="rtMembers" class="member-list"><li class="muted">Waiting for presence snapshot…</li></ul>
+
+        <div id="voicePanel" class="voice-panel">
+          <div class="voice-head">
             <div>
-              <div class="card-kicker">CREW MAP</div>
-              <p class="map-caption">Live room positions. Drag to pan, wheel/pinch to zoom, or fit the crew.</p>
+              <div class="card-kicker">PUSH TO TALK</div>
+              <p id="voiceStatus" class="voice-status">Off · microphone never starts automatically</p>
             </div>
-            <div class="map-actions">
-              <button id="mapFit" type="button" class="mini">Fit crew</button>
-              <button id="mapZoomOut" type="button" class="mini map-icon" aria-label="Zoom out">−</button>
-              <button id="mapZoomIn" type="button" class="mini map-icon" aria-label="Zoom in">+</button>
-            </div>
+            <button id="voiceEnable" type="button" class="mini">Enable PTT</button>
           </div>
-          <div id="crewMap" class="crew-map" role="application" aria-label="Live crew map"></div>
-          <div class="map-foot">
-            <a id="mapAttribution" href="#" target="_blank" rel="noopener noreferrer"></a>
-            <span>Location remains room-scoped and ephemeral.</span>
+          <button id="talkButton" type="button" class="talk-button" disabled aria-label="Hold to talk">
+            <strong id="talkLabel">HOLD TO TALK</strong>
+            <span id="talkHint">Enable microphone first</span>
+          </button>
+          <div class="voice-foot">
+            <span id="voiceSpeaker">Channel clear</span>
+            <span id="turnStatus">TURN status unknown</span>
+          </div>
+          <p class="privacy-note">PTT is available to guest riders. The WebSocket carries only room-scoped signaling and talk-floor state; voice audio travels over WebRTC.</p>
+        </div>
+
+        <div id="hostPanel" class="host-panel hidden">
+          <div>
+            <div class="card-kicker">HOST CONTROLS</div>
+            <p class="host-caption">Signed-in host controls for this Ryde.</p>
+          </div>
+          <div class="host-actions">
+            <button id="roomLockToggle" type="button" class="mini">Lock Ryde</button>
+            <button id="roomEnd" type="button" class="mini danger">End Ryde</button>
           </div>
         </div>
 
-        <ul id="rtLocations" class="location-list"><li class="muted">No one is sharing location.</li></ul>
+        <div class="location-panel">
+          <div class="location-head">
+            <div>
+              <div class="card-kicker">LIVE LOCATION</div>
+              <p id="locationStatus" class="location-status">Off · never starts automatically</p>
+            </div>
+            <button id="locationToggle" type="button" class="mini location-toggle">Share my location</button>
+          </div>
+          <p class="privacy-note">Visible only to authenticated members of this ride. Coordinates are ephemeral and are cleared when you stop, disconnect, go stale, or the room expires.</p>
+
+          <div class="crew-map-shell">
+            <div class="map-toolbar">
+              <div>
+                <div class="card-kicker">CREW MAP</div>
+                <p class="map-caption">Live room positions. Drag to pan, wheel/pinch to zoom, or fit the crew.</p>
+              </div>
+              <div class="map-actions">
+                <button id="mapFit" type="button" class="mini">Fit crew</button>
+                <button id="mapZoomOut" type="button" class="mini map-icon" aria-label="Zoom out">−</button>
+                <button id="mapZoomIn" type="button" class="mini map-icon" aria-label="Zoom in">+</button>
+              </div>
+            </div>
+            <div id="crewMap" class="crew-map" role="application" aria-label="Live crew map"></div>
+            <div class="map-foot">
+              <a id="mapAttribution" href="#" target="_blank" rel="noopener noreferrer"></a>
+              <span>Location remains room-scoped and ephemeral.</span>
+            </div>
+          </div>
+
+          <ul id="rtLocations" class="location-list"><li class="muted">No one is sharing location.</li></ul>
+        </div>
+      </section>
+
+      <section id="roomEmpty" class="view-empty">
+        <div class="card-kicker">NO ACTIVE ROOM</div>
+        <h3>Join or start a Ryde first.</h3>
+        <p>Once the realtime room connects, presence, PTT, host controls, and live location will appear here.</p>
+        <button type="button" data-view-jump="access">Go to Access</button>
+      </section>
+    </section>
+
+    <section id="musicView" class="app-view" data-view="music" hidden>
+      <div class="page-heading">
+        <div>
+          <div class="eyebrow">ECHOVERSE</div>
+          <h2>Shared soundtrack + full library.</h2>
+        </div>
+        <p>Keep room playback at the top, then search, browse, and build playlists from the complete EchoVerse catalog below.</p>
       </div>
 
-      <div class="playback-panel">
-        <div class="playback-head">
-          <div>
-            <div class="card-kicker">SHARED SOUNDTRACK</div>
-            <h3 id="sharedTrackTitle">No shared track</h3>
-            <p id="sharedTrackMeta" class="playback-meta">Room soundtrack is idle</p>
+      <div class="music-surface">
+        <div class="playback-panel">
+          <div class="playback-head">
+            <div>
+              <div class="card-kicker">SHARED SOUNDTRACK</div>
+              <h3 id="sharedTrackTitle">No shared track</h3>
+              <p id="sharedTrackMeta" class="playback-meta">Room soundtrack is idle</p>
+            </div>
+            <div class="playback-readout">
+              <span id="sharedPlaybackState" class="playback-state">IDLE</span>
+              <small id="sharedPlaybackClock">Waiting for a host to select a track.</small>
+            </div>
           </div>
-          <div class="playback-readout">
-            <span id="sharedPlaybackState" class="playback-state">IDLE</span>
-            <small id="sharedPlaybackClock">Waiting for a host to select a track.</small>
+          <div id="sharedPlaybackControls" class="playback-controls" hidden>
+            <button id="playbackBack" type="button" class="mini">−10s</button>
+            <button id="playbackPlay" type="button" class="mini">Play</button>
+            <button id="playbackPause" type="button" class="mini">Pause</button>
+            <button id="playbackForward" type="button" class="mini">+10s</button>
+            <button id="playbackClear" type="button" class="mini danger">Clear</button>
           </div>
+          <div class="listener-controls">
+            <button id="audioListenToggle" type="button" class="mini secondary">Listen with crew</button>
+            <button id="audioMuteToggle" type="button" class="mini">Mute</button>
+            <label class="local-volume">Volume <input id="audioVolume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Local shared music volume" /></label>
+            <span id="audioClientStatus" class="playback-client-state">OFF · audio never starts automatically</span>
+          </div>
+          <audio id="sharedAudio" class="shared-audio" preload="metadata"></audio>
+          <p class="privacy-note">Shared play/pause/seek belongs to the signed-in host or co-host. Every rider keeps local volume, mute, and Stop Listening. Guests receive only a short-lived grant for the Ryde's current shared track; signing in never loans the host's full EchoVerse library access to the room.</p>
         </div>
-        <div id="sharedPlaybackControls" class="playback-controls" hidden>
-          <button id="playbackBack" type="button" class="mini">−10s</button>
-          <button id="playbackPlay" type="button" class="mini">Play</button>
-          <button id="playbackPause" type="button" class="mini">Pause</button>
-          <button id="playbackForward" type="button" class="mini">+10s</button>
-          <button id="playbackClear" type="button" class="mini danger">Clear</button>
-        </div>
-        <p class="privacy-note">The room carries only an opaque EchoVerse track ID plus server-authoritative play/pause/seek timing. Each rider must independently pass EchoVerse access before resolving metadata or audio.</p>
-      </div>
 
-      <div class="echoverse-panel">
-        <div class="echoverse-head">
-          <div>
-            <div class="card-kicker">ECHOVERSE LIBRARY</div>
-            <p id="echoverseStatus" class="echoverse-status">AeroVista Identity controls library access.</p>
+        <div class="echoverse-panel">
+          <div class="echoverse-head">
+            <div>
+              <div class="card-kicker">ECHOVERSE LIBRARY</div>
+              <p id="echoverseStatus" class="echoverse-status">AeroVista Identity controls library access.</p>
+            </div>
+            <button id="echoverseLoad" type="button" class="mini">Load library</button>
           </div>
-          <button id="echoverseLoad" type="button" class="mini">Load library</button>
+          <p class="privacy-note">RydeSync talks to the canonical EchoVerse Library API server-side. The private upstream address is never exposed to the browser.</p>
+
+          <div id="libraryWorkbench" class="library-workbench" aria-live="polite">
+            <div class="library-browser">
+              <div class="library-tools">
+                <label class="library-search">Search library<input id="librarySearch" type="search" placeholder="Track, artist, or album…" autocomplete="off" disabled /></label>
+                <label>Artist<select id="libraryArtist" disabled><option value="">All artists</option></select></label>
+                <label>Album<select id="libraryAlbum" disabled><option value="">All albums</option></select></label>
+                <label>Sort<select id="librarySort" disabled><option value="title">Title A–Z</option><option value="artist">Artist A–Z</option><option value="album">Album A–Z</option></select></label>
+              </div>
+              <div class="library-browser-meta">
+                <span id="libraryResultCount">Load the library to browse tracks.</span>
+                <button id="libraryClearFilters" type="button" class="mini" disabled>Clear filters</button>
+              </div>
+              <div id="echoverseTracks" class="track-grid"><div class="muted">Library not loaded.</div></div>
+              <div class="library-pagination">
+                <button id="libraryPrev" type="button" class="mini" disabled>Previous</button>
+                <span id="libraryPageInfo">Page —</span>
+                <button id="libraryNext" type="button" class="mini" disabled>Next</button>
+              </div>
+            </div>
+
+            <aside class="playlist-panel">
+              <div class="playlist-head">
+                <div>
+                  <div class="card-kicker">MY PLAYLISTS</div>
+                  <p>Saved on this device.</p>
+                </div>
+              </div>
+              <form id="playlistCreateForm" class="playlist-create-form">
+                <label>New playlist<input id="playlistName" name="playlistName" placeholder="Night Ride" maxlength="80" required /></label>
+                <button type="submit" class="mini">Create</button>
+              </form>
+              <label class="playlist-select-label">Active playlist<select id="playlistSelect"><option value="">No playlist selected</option></select></label>
+              <div id="playlistSummary" class="playlist-summary muted">Create a playlist, then add tracks from the library.</div>
+              <div id="playlistTracks" class="playlist-tracks"></div>
+            </aside>
+          </div>
         </div>
-        <p class="privacy-note">RydeSync talks to the canonical EchoVerse Library API server-side. The private upstream address is never exposed to the browser.</p>
-        <div id="echoverseTracks" class="track-grid"><div class="muted">Library not loaded.</div></div>
       </div>
     </section>
 
@@ -142,6 +300,9 @@
       <span>Live location: <strong id="locationMode">—</strong></span>
     </footer>
   </main>
+  <script src="/catalog-bridge.js"></script>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/ui-shell.js"></script>
+  <script type="module" src="/library-ui.js"></script>
 </body>
 </html>

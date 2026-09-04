@@ -4,6 +4,13 @@ import { issueRoomToken } from './room-token.js';
 
 const ROOM_MODES = new Set(['group_ride', 'listening_party', 'classroom', 'band_practice', 'campaign']);
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const DEFAULT_ROLE_BY_MODE = Object.freeze({
+  group_ride: 'rider',
+  listening_party: 'listener',
+  classroom: 'listener',
+  band_practice: 'speaker',
+  campaign: 'listener'
+});
 
 function shortCode(length = 8) {
   const bytes = crypto.randomBytes(length);
@@ -53,6 +60,7 @@ export class RoomStore {
       createdAt,
       expiresAt: createdAt + this.config.roomTtlSeconds * 1000,
       hostMemberId: memberId,
+      locked: false,
       members: new Map()
     };
     room.members.set(memberId, {
@@ -89,11 +97,12 @@ export class RoomStore {
 
   join(idOrCode, { displayName }, principal) {
     const room = this.resolve(idOrCode);
+    if (room.locked) throw new HttpError(423, 'room_locked', 'This Ryde is locked to new riders');
     const memberId = crypto.randomUUID();
     const joinedAt = this.now();
     const member = {
       id: memberId,
-      role: room.mode === 'listening_party' ? 'listener' : 'rider',
+      role: DEFAULT_ROLE_BY_MODE[room.mode] || 'rider',
       identityId: principal.identityId,
       displayName: principal.displayName || cleanText(displayName || 'Guest Rider', { field: 'displayName', min: 1, max: 60 }),
       joinedAt
@@ -113,6 +122,21 @@ export class RoomStore {
     };
   }
 
+  setLocked(roomId, memberId, locked) {
+    const room = this.resolve(roomId);
+    if (room.hostMemberId !== memberId) throw new HttpError(403, 'host_required', 'Only the Ryde host can lock or unlock the room');
+    room.locked = Boolean(locked);
+    return room.locked;
+  }
+
+  end(roomId, memberId) {
+    const room = this.resolve(roomId);
+    if (room.hostMemberId !== memberId) throw new HttpError(403, 'host_required', 'Only the Ryde host can end the room');
+    this.rooms.delete(room.id);
+    this.codes.delete(room.joinCode);
+    return room;
+  }
+
   publicRoom(room) {
     return {
       id: room.id,
@@ -121,7 +145,8 @@ export class RoomStore {
       mode: room.mode,
       createdAt: new Date(room.createdAt).toISOString(),
       expiresAt: new Date(room.expiresAt).toISOString(),
-      memberCount: room.members.size
+      memberCount: room.members.size,
+      locked: Boolean(room.locked)
     };
   }
 }
