@@ -18,6 +18,12 @@ function ensureHeadLinks() {
     icon.type = 'image/svg+xml';
     document.head.append(icon);
   }
+  if (!document.querySelector('meta[name="mobile-web-app-capable"]')) {
+    const capable = document.createElement('meta');
+    capable.name = 'mobile-web-app-capable';
+    capable.content = 'yes';
+    document.head.append(capable);
+  }
   if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) {
     const capable = document.createElement('meta');
     capable.name = 'apple-mobile-web-app-capable';
