@@ -18,7 +18,7 @@ function showView(name) {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
-  const labels = { access: 'Login', ride: 'Ryde', room: 'Room + Map', music: 'Music' };
+  const labels = { access: 'Login', ride: 'Ryde', room: 'Room + Map', music: 'Music', dashboard: 'Dashboard' };
   document.title = `RydeSync · ${labels[target] || 'RydeSync'}`;
 }
 
