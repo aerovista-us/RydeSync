@@ -13,6 +13,45 @@ let miniMap = null;
 let miniMapPromise = null;
 let lastMapSignature = '';
 let dashboardTalkActive = false;
+let smoothedSpeedMph = null;
+let musicDrawerOpen = false;
+let lastModePreferenceKey = '';
+const MODE_PREFS_KEY = 'rydesync:mode-preferences:v1';
+
+const MODE_DASHBOARDS = Object.freeze({
+  group_ride: { label: 'Group Ride', map: 'primary', ptt: 'preferred', music: 'secondary' },
+  listening_party: { label: 'Listening Party', map: 'secondary', ptt: 'optional', music: 'primary' },
+  classroom: { label: 'Classroom', map: 'optional', ptt: 'host-led', music: 'reference' },
+  band_practice: { label: 'Band Practice', map: 'optional', ptt: 'preferred', music: 'reference' },
+  campaign: { label: 'Campaign', map: 'mission', ptt: 'preferred', music: 'secondary' }
+});
+
+function activeRoomSession() {
+  try { return JSON.parse(localStorage.getItem('rydesync:last-session') || 'null'); } catch { return null; }
+}
+
+function activeRoomMode() {
+  try {
+    const session = activeRoomSession();
+    return MODE_DASHBOARDS[session?.room?.mode] ? session.room.mode : 'group_ride';
+  } catch { return 'group_ride'; }
+}
+
+function readModePreferences() {
+  try { return JSON.parse(localStorage.getItem(MODE_PREFS_KEY) || '{}') || {}; } catch { return {}; }
+}
+
+function modePreferences(mode = activeRoomMode()) {
+  return { autoPtt: false, autoLocation: false, ...(readModePreferences()[mode] || {}) };
+}
+
+function saveModePreferences(mode, patch) {
+  const all = readModePreferences();
+  all[mode] = { ...modePreferences(mode), ...patch };
+  localStorage.setItem(MODE_PREFS_KEY, JSON.stringify(all));
+  return all[mode];
+}
+
 
 function installCockpit() {
   const view = $('#dashboardView');
@@ -43,6 +82,8 @@ function installCockpit() {
           </div>
         </div>
         <div id="dashMiniMap" class="crew-map dashboard-mini-map" role="img" aria-label="Condensed live crew map"></div>
+        <div class="dashboard-speed" aria-label="Current device speed"><strong id="dashSpeed">--</strong><span>MPH</span></div>
+        <button id="dashModeSettings" type="button" class="dashboard-mode-settings" aria-label="Room mode preferences">⚙</button>
         <div id="dashCrewStrip" class="dashboard-crew-strip" aria-live="polite">
           <span class="dashboard-crew-empty">No crew online yet</span>
         </div>
@@ -74,7 +115,11 @@ function installCockpit() {
               <strong id="dashMusicTitle">No shared track</strong>
               <small id="dashMusicDetail">Room soundtrack is idle</small>
             </div>
-            <span id="dashMusicState" class="dashboard-status">IDLE</span>
+            <div class="dashboard-music-actions">
+              <span id="dashMusicState" class="dashboard-status">IDLE</span>
+              <button id="dashMiniPlay" type="button" class="dashboard-mini-play" aria-label="Play or pause shared music">▶</button>
+              <button id="dashMusicDrawerToggle" type="button" class="dashboard-drawer-toggle" aria-expanded="false" aria-label="Show full player">⌃</button>
+            </div>
           </div>
           <div id="dashHostMusicControls" class="dashboard-transport" hidden>
             <button type="button" class="mini" data-dashboard-proxy="playbackBack">−10s</button>
@@ -88,6 +133,14 @@ function installCockpit() {
           </div>
         </article>
       </div>
+    </section>
+
+    <section id="dashModeSheet" class="dashboard-mode-sheet" hidden>
+      <div class="dashboard-mode-sheet-head"><div><span class="card-kicker">ROOM MODE</span><strong id="dashModeLabel">Group Ride</strong></div><button id="dashModeSheetClose" type="button" class="mini">Done</button></div>
+      <p>Remember how this device should prepare features when you join this room type. Browser permission still stays under your control.</p>
+      <label class="dashboard-pref"><input id="dashAutoPtt" type="checkbox" /> <span><strong>PTT ready automatically</strong><small>Uses microphone automatically only after browser permission is already granted.</small></span></label>
+      <label class="dashboard-pref"><input id="dashAutoLocation" type="checkbox" /> <span><strong>Share location automatically</strong><small>Starts room location sharing automatically only after browser permission is already granted.</small></span></label>
+      <small id="dashPermissionState" class="dashboard-permission-state">Permissions checked on this device.</small>
     </section>
 
     <details class="dashboard-health">
@@ -282,6 +335,11 @@ function syncControlMirrors() {
     dashListen.textContent = sourceListen.textContent;
     dashListen.disabled = sourceListen.disabled;
   }
+  const miniPlay = sourceButton('dashMiniPlay');
+  if (miniPlay) {
+    miniPlay.textContent = playbackState === 'PLAYING' ? 'Ⅱ' : '▶';
+    miniPlay.setAttribute('aria-label', playbackState === 'PLAYING' ? 'Pause shared music' : 'Play shared music');
+  }
   const sourceMute = sourceButton('audioMuteToggle');
   const dashMute = sourceButton('dashMuteToggle');
   if (dashMute && sourceMute) {
@@ -290,8 +348,54 @@ function syncControlMirrors() {
   }
 }
 
+async function permissionState(name) {
+  try {
+    if (!navigator.permissions?.query) return 'unknown';
+    return (await navigator.permissions.query({ name })).state || 'unknown';
+  } catch { return 'unknown'; }
+}
+
+async function applyModePreferences({ userInitiated = false } = {}) {
+  const mode = activeRoomMode();
+  const prefs = modePreferences(mode);
+  const mic = await permissionState('microphone');
+  const geo = await permissionState('geolocation');
+  setValue('dashPermissionState', `Microphone ${mic} · Location ${geo}`);
+  const voiceEnable = sourceButton('voiceEnable');
+  const locationToggle = sourceButton('locationToggle');
+  if (prefs.autoPtt && voiceEnable && !/disable|stop/i.test(voiceEnable.textContent || '') && (userInitiated || mic === 'granted')) voiceEnable.click();
+  if (prefs.autoLocation && locationToggle && !/stop/i.test(locationToggle.textContent || '') && (userInitiated || geo === 'granted')) locationToggle.click();
+}
+
+function renderModeControls() {
+  const mode = activeRoomMode();
+  const profile = MODE_DASHBOARDS[mode];
+  const prefs = modePreferences(mode);
+  const view = $('#dashboardView');
+  if (view) view.dataset.rydeMode = mode;
+  document.body.dataset.rydeMode = mode;
+  setValue('dashModeLabel', profile.label);
+  const ptt = $('#dashAutoPtt');
+  const location = $('#dashAutoLocation');
+  if (ptt) ptt.checked = prefs.autoPtt;
+  if (location) location.checked = prefs.autoLocation;
+}
+
+function setDashboardActiveClass() {
+  const view = $('#dashboardView');
+  document.body.classList.toggle('dashboard-active', Boolean(view && !view.hidden));
+}
+
 function renderDashboard() {
   const roomActive = visibleRoom();
+  setDashboardActiveClass();
+  renderModeControls();
+  const preferenceSession = activeRoomSession();
+  const preferenceKey = `${preferenceSession?.room?.id || 'none'}:${activeRoomMode()}`;
+  if (roomActive && preferenceKey !== lastModePreferenceKey) {
+    lastModePreferenceKey = preferenceKey;
+    setTimeout(() => applyModePreferences(), 0);
+  }
   const members = crewMembers();
   const locationStatus = text('locationStatus', 'Off');
   const snapshot = buildDashboardSnapshot({
@@ -365,6 +469,35 @@ $('#dashTransportToggle')?.addEventListener('click', () => {
   proxyClick(state === 'PLAYING' ? 'playbackPause' : 'playbackPlay');
 });
 
+$('#dashMusicDrawerToggle')?.addEventListener('click', () => {
+  musicDrawerOpen = !musicDrawerOpen;
+  $('#dashboardView')?.classList.toggle('music-drawer-open', musicDrawerOpen);
+  $('#dashMusicDrawerToggle')?.setAttribute('aria-expanded', String(musicDrawerOpen));
+  if ($('#dashMusicDrawerToggle')) $('#dashMusicDrawerToggle').textContent = musicDrawerOpen ? '⌄' : '⌃';
+});
+$('#dashMiniPlay')?.addEventListener('click', () => {
+  const state = text('sharedPlaybackState', 'IDLE').toUpperCase();
+  const target = state === 'PLAYING' ? sourceButton('playbackPause') : sourceButton('playbackPlay');
+  if (target && !target.disabled) target.click();
+  else proxyClick('audioListenToggle');
+});
+$('#dashModeSettings')?.addEventListener('click', () => { $('#dashModeSheet').hidden = false; renderModeControls(); applyModePreferences(); });
+$('#dashModeSheetClose')?.addEventListener('click', () => { $('#dashModeSheet').hidden = true; });
+$('#dashAutoPtt')?.addEventListener('change', (event) => {
+  const enabled = event.currentTarget.checked;
+  saveModePreferences(activeRoomMode(), { autoPtt: enabled });
+  const button = sourceButton('voiceEnable');
+  if (enabled && button && !/disable|stop/i.test(button.textContent || '')) button.click();
+  applyModePreferences();
+});
+$('#dashAutoLocation')?.addEventListener('change', (event) => {
+  const enabled = event.currentTarget.checked;
+  saveModePreferences(activeRoomMode(), { autoLocation: enabled });
+  const button = sourceButton('locationToggle');
+  if (enabled && button && !/stop/i.test(button.textContent || '')) button.click();
+  applyModePreferences();
+});
+
 const dashPtt = $('#dashPttButton');
 dashPtt?.addEventListener('pointerdown', (event) => {
   event.preventDefault();
@@ -396,6 +529,18 @@ for (const id of observedIds) {
   if (element) observer.observe(element, { attributes: true, childList: true, characterData: true, subtree: true });
 }
 
+window.addEventListener('rydesync:self-location', (event) => {
+  const metersPerSecond = Number(event.detail?.speed);
+  if (!Number.isFinite(metersPerSecond) || metersPerSecond < 0) {
+    smoothedSpeedMph = null;
+    setValue('dashSpeed', '--');
+    return;
+  }
+  const mph = metersPerSecond * 2.2369362921;
+  smoothedSpeedMph = smoothedSpeedMph == null ? mph : (smoothedSpeedMph * 0.68 + mph * 0.32);
+  setValue('dashSpeed', String(Math.max(0, Math.round(smoothedSpeedMph))));
+});
+
 window.addEventListener('rydesync:voice-observability', (event) => {
   Object.assign(voiceObserved, event.detail || {});
   renderDashboard();
@@ -404,3 +549,4 @@ window.addEventListener('hashchange', renderDashboard);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) renderDashboard(); });
 setInterval(renderDashboard, 1500);
 renderDashboard();
+setTimeout(() => applyModePreferences(), 500);

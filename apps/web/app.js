@@ -244,6 +244,12 @@ function startLocationSharing() {
   renderLocationControl('Requesting device location…', 'warn');
   locationShare.watchId = navigator.geolocation.watchPosition((position) => {
     locationShare.latest = position;
+    window.dispatchEvent(new CustomEvent('rydesync:self-location', { detail: {
+      speed: Number.isFinite(position.coords.speed) && position.coords.speed >= 0 ? position.coords.speed : null,
+      heading: Number.isFinite(position.coords.heading) && position.coords.heading >= 0 ? position.coords.heading : null,
+      accuracy: position.coords.accuracy,
+      timestamp: position.timestamp
+    } }));
     renderLocationControl(`Sharing · ±${Math.round(position.coords.accuracy)}m`, 'online');
     sendLatestLocation();
   }, (error) => {
