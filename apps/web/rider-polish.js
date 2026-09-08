@@ -38,7 +38,8 @@ function decorateCrewStrip(speeds) {
 
     if (!detail.dataset.rydeRole) detail.dataset.rydeRole = clean(detail.textContent) || 'rider';
     const mph = speeds.get(name);
-    detail.textContent = mph ? `${detail.dataset.rydeRole} · ${mph}` : detail.dataset.rydeRole;
+    const next = mph ? `${detail.dataset.rydeRole} · ${mph}` : detail.dataset.rydeRole;
+    if (detail.textContent !== next) detail.textContent = next;
     detail.classList.toggle('dashboard-crew-speed', Boolean(mph));
   }
 }
@@ -59,7 +60,8 @@ function decorateMiniMapLabels(speeds) {
       detail.dataset.rydePolish = 'speed';
       label.appendChild(detail);
     }
-    detail.textContent = mph.toLowerCase();
+    const next = mph.toLowerCase();
+    if (detail.textContent !== next) detail.textContent = next;
   }
 }
 
