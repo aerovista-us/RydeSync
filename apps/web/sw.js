@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rydesync-shell-2026-09-04-4';
+const CACHE_NAME = 'rydesync-shell-2026-09-08-1';
 const SHELL_ASSETS = [
   '/',
   '/offline.html',
@@ -7,12 +7,14 @@ const SHELL_ASSETS = [
   '/icon-maskable.svg',
   '/styles.css',
   '/product-ui.css',
+  '/rider-polish.css',
   '/catalog-bridge.js',
   '/app.js',
   '/ui-shell.js',
   '/dashboard.js',
   '/dashboard-core.js',
   '/dashboard.css',
+  '/rider-polish.js',
   '/library-ui.js',
   '/library-core.js',
   '/map.js',
