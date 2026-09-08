@@ -20,6 +20,8 @@ const playlistSelect = $('#playlistSelect');
 const playlistSummary = $('#playlistSummary');
 const playlistTracks = $('#playlistTracks');
 const playbackControls = $('#sharedPlaybackControls');
+const audioListenToggle = $('#audioListenToggle');
+const sharedAudio = $('#sharedAudio');
 
 const state = {
   tracks: [],
@@ -29,7 +31,13 @@ const state = {
   album: '',
   sort: 'title',
   playlists: [],
-  activePlaylistId: null
+  activePlaylistId: null,
+  queue: {
+    playlistId: null,
+    trackIds: [],
+    index: -1,
+    active: false
+  }
 };
 
 function escapeHtml(value) {
@@ -89,6 +97,86 @@ function selectedTrackIds() {
   return new Set(activePlaylist()?.trackIds || []);
 }
 
+function playableTrackIds(playlist = activePlaylist()) {
+  if (!playlist) return [];
+  return playlist.trackIds.filter((id) => Boolean(trackById(id)));
+}
+
+function ensureLocalListening() {
+  if (!audioListenToggle || audioListenToggle.disabled) return;
+  if (/listen with crew/i.test(audioListenToggle.textContent || '')) audioListenToggle.click();
+}
+
+function requestTrackPlayback(trackId) {
+  const id = String(trackId || '');
+  if (!id || !canControlPlayback()) return false;
+
+  ensureLocalListening();
+  const existing = [...trackGrid.querySelectorAll('.track-sync')].find((button) => button.dataset.trackId === id && !button.disabled);
+  if (existing) {
+    existing.click();
+    return true;
+  }
+
+  const bridge = document.createElement('button');
+  bridge.type = 'button';
+  bridge.className = 'track-sync';
+  bridge.dataset.trackId = id;
+  bridge.hidden = true;
+  trackGrid.appendChild(bridge);
+  bridge.click();
+  bridge.remove();
+  return true;
+}
+
+function clearRoomPlayback() {
+  const clear = $('#playbackClear');
+  if (clear && !clear.disabled) clear.click();
+}
+
+function stopQueue({ clearRoom = false } = {}) {
+  state.queue = { playlistId: null, trackIds: [], index: -1, active: false };
+  if (clearRoom) clearRoomPlayback();
+}
+
+function playQueueIndex(index) {
+  if (!state.queue.active || index < 0 || index >= state.queue.trackIds.length) return false;
+  const trackId = state.queue.trackIds[index];
+  if (!requestTrackPlayback(trackId)) return false;
+  state.queue.index = index;
+  renderPlaylist();
+  return true;
+}
+
+function startPlaylistQueue(startTrackId = null) {
+  const playlist = activePlaylist();
+  const trackIds = playableTrackIds(playlist);
+  if (!playlist || !trackIds.length || !canControlPlayback()) return false;
+  let index = startTrackId ? trackIds.indexOf(String(startTrackId)) : 0;
+  if (index < 0) index = 0;
+  state.queue = { playlistId: playlist.id, trackIds, index, active: true };
+  return playQueueIndex(index);
+}
+
+function advanceQueue(delta = 1) {
+  if (!state.queue.active || !state.queue.trackIds.length) return false;
+  const nextIndex = state.queue.index + Number(delta || 0);
+  if (nextIndex < 0) return playQueueIndex(0);
+  if (nextIndex >= state.queue.trackIds.length) {
+    stopQueue({ clearRoom: true });
+    renderPlaylist();
+    return false;
+  }
+  return playQueueIndex(nextIndex);
+}
+
+function queueStatus(playlist) {
+  if (!state.queue.active || state.queue.playlistId !== playlist?.id) return '';
+  const currentId = state.queue.trackIds[state.queue.index];
+  const current = trackById(currentId);
+  return `<div class="playlist-flash">Queued ${state.queue.index + 1} of ${state.queue.trackIds.length} · ${escapeHtml(current?.title || currentId)}</div>`;
+}
+
 function renderTrackCard(track, selectedIds) {
   const id = trackKey(track);
   const title = track.title || 'Untitled track';
@@ -104,7 +192,7 @@ function renderTrackCard(track, selectedIds) {
       </div>
       <span class="track-stream-state">Protected stream · per-rider entitlement</span>
       <div class="track-actions">
-        <button type="button" class="mini track-sync" data-track-id="${escapeHtml(id)}" ${canControlPlayback() ? '' : 'disabled'}>Sync to room</button>
+        <button type="button" class="mini track-sync" data-track-id="${escapeHtml(id)}" title="Play now in the shared Ryde player" ${canControlPlayback() ? '' : 'disabled'}>Play now</button>
         <button type="button" class="mini track-playlist ${inPlaylist ? 'added' : ''}" data-track-id="${escapeHtml(id)}" ${activePlaylist() ? '' : 'disabled'}>${inPlaylist ? 'In playlist' : '+ Playlist'}</button>
       </div>
     </article>`;
@@ -150,11 +238,16 @@ function renderPlaylist() {
     return;
   }
 
+  const playableIds = playableTrackIds(playlist);
+  const queueActive = state.queue.active && state.queue.playlistId === playlist.id;
   playlistSummary.className = 'playlist-summary';
   playlistSummary.innerHTML = `
     <strong>${escapeHtml(playlist.name)}</strong><br />
     ${playlist.trackIds.length.toLocaleString()} track${playlist.trackIds.length === 1 ? '' : 's'} saved on this device.
+    ${queueStatus(playlist)}
     <div class="playlist-summary-actions">
+      <button id="playlistPlay" type="button" class="mini" ${playableIds.length && canControlPlayback() ? '' : 'disabled'}>${queueActive ? 'Restart playlist' : 'Play playlist'}</button>
+      ${queueActive ? '<button id="playlistPrevious" type="button" class="mini secondary">Previous</button><button id="playlistNext" type="button" class="mini secondary">Next</button><button id="playlistStop" type="button" class="mini secondary">Stop queue</button>' : ''}
       <button id="playlistDelete" type="button" class="mini danger">Delete playlist</button>
     </div>`;
 
@@ -165,12 +258,23 @@ function renderPlaylist() {
         <strong>${escapeHtml(track?.title || id)}</strong>
         <small>${escapeHtml(track ? [track.artist, track.album].filter(Boolean).join(' · ') || 'EchoVerse' : 'Track not in current catalog')}</small>
       </div>
-      <button type="button" class="mini playlist-remove" data-track-id="${escapeHtml(id)}" aria-label="Remove ${escapeHtml(track?.title || id)}">Remove</button>
+      <div class="track-actions">
+        <button type="button" class="mini playlist-play" data-track-id="${escapeHtml(id)}" ${track && canControlPlayback() ? '' : 'disabled'}>Play</button>
+        <button type="button" class="mini playlist-remove" data-track-id="${escapeHtml(id)}" aria-label="Remove ${escapeHtml(track?.title || id)}">Remove</button>
+      </div>
     </div>`).join('') : '<div class="playlist-empty">No tracks yet. Browse the library and tap + Playlist.</div>';
 
+  $('#playlistPlay')?.addEventListener('click', () => startPlaylistQueue());
+  $('#playlistPrevious')?.addEventListener('click', () => advanceQueue(-1));
+  $('#playlistNext')?.addEventListener('click', () => advanceQueue(1));
+  $('#playlistStop')?.addEventListener('click', () => {
+    stopQueue();
+    renderPlaylist();
+  });
   $('#playlistDelete')?.addEventListener('click', () => {
     const doomed = activePlaylist();
     if (!doomed) return;
+    if (state.queue.playlistId === doomed.id) stopQueue({ clearRoom: false });
     state.playlists = state.playlists.filter((candidate) => candidate.id !== doomed.id);
     state.activePlaylistId = state.playlists[0]?.id || null;
     persistPlaylists();
@@ -284,13 +388,21 @@ trackGrid?.addEventListener('click', (event) => {
   addToActivePlaylist(button.dataset.trackId);
 });
 playlistTracks?.addEventListener('click', (event) => {
-  const button = event.target.closest?.('.playlist-remove');
-  if (!button) return;
-  removeFromActivePlaylist(button.dataset.trackId);
+  const play = event.target.closest?.('.playlist-play');
+  if (play && !play.disabled) {
+    startPlaylistQueue(play.dataset.trackId);
+    return;
+  }
+  const remove = event.target.closest?.('.playlist-remove');
+  if (!remove) return;
+  removeFromActivePlaylist(remove.dataset.trackId);
+});
+sharedAudio?.addEventListener('ended', () => {
+  if (state.queue.active && canControlPlayback()) advanceQueue(1);
 });
 
 new MutationObserver(() => {
-  if (state.tracks.length) renderLibrary();
+  if (state.tracks.length) renderPlaylist();
 }).observe(playbackControls, { attributes: true, attributeFilter: ['hidden'] });
 
 window.addEventListener('rydesync:catalog', (event) => acceptCatalog(event.detail));
