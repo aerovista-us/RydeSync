@@ -1,12 +1,8 @@
-import { CrewMap } from '/map.js';
-
-const MPH_PER_MPS = 2.2369362921;
-const originalSetLocations = CrewMap.prototype.setLocations;
-let canonicalSnapshot = { locations: [], members: [], selfMemberId: null };
+const MPH_PATTERN = /(-?\d+(?:\.\d+)?)\s*mph/i;
 let decorateQueued = false;
 
 function installPolishStyles() {
-  if (document.querySelector('link[href="/rider-polish.css"]')) return;
+  if (typeof document === 'undefined' || document.querySelector('link[href="/rider-polish.css"]')) return;
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.href = '/rider-polish.css';
@@ -14,54 +10,46 @@ function installPolishStyles() {
 }
 
 function clean(value) {
-  return String(value || '').trim();
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function speedMph(speed) {
-  return Number.isFinite(speed) && speed >= 0 ? speed * MPH_PER_MPS : null;
-}
-
-function locationsByUniqueName() {
-  const members = new Map(canonicalSnapshot.members.map((member) => [member.id, member]));
-  const byName = new Map();
+function mapSpeedsByUniqueName() {
+  const speeds = new Map();
   const duplicates = new Set();
+  if (typeof document === 'undefined') return speeds;
 
-  for (const entry of canonicalSnapshot.locations) {
-    const name = clean(members.get(entry.memberId)?.displayName);
-    if (!name) continue;
-    if (byName.has(name)) duplicates.add(name);
-    byName.set(name, entry);
+  for (const label of document.querySelectorAll('#crewMap .map-label')) {
+    const name = clean(label.querySelector('strong')?.textContent);
+    const match = clean(label.querySelector('small')?.textContent).match(MPH_PATTERN);
+    if (!name || name === 'You' || !match) continue;
+    if (speeds.has(name)) duplicates.add(name);
+    speeds.set(name, `${Math.round(Number(match[1]))} MPH`);
   }
 
-  for (const name of duplicates) byName.delete(name);
-  return byName;
+  for (const name of duplicates) speeds.delete(name);
+  return speeds;
 }
 
-function decorateCrewStrip() {
-  const byName = locationsByUniqueName();
+function decorateCrewStrip(speeds) {
   for (const chip of document.querySelectorAll('#dashCrewStrip .dashboard-crew-chip')) {
     const name = clean(chip.querySelector('strong')?.textContent);
     const detail = chip.querySelector('small');
     if (!detail) continue;
 
     if (!detail.dataset.rydeRole) detail.dataset.rydeRole = clean(detail.textContent) || 'rider';
-    const mph = speedMph(byName.get(name)?.speed);
-    detail.textContent = mph == null ? detail.dataset.rydeRole : `${detail.dataset.rydeRole} · ${mph.toFixed(0)} MPH`;
-    detail.classList.toggle('dashboard-crew-speed', mph != null);
+    const mph = speeds.get(name);
+    detail.textContent = mph ? `${detail.dataset.rydeRole} · ${mph}` : detail.dataset.rydeRole;
+    detail.classList.toggle('dashboard-crew-speed', Boolean(mph));
   }
 }
 
-function decorateMiniMapLabels() {
-  const byName = locationsByUniqueName();
+function decorateMiniMapLabels(speeds) {
   for (const label of document.querySelectorAll('#dashMiniMap .map-label')) {
-    const riderName = clean(label.querySelector('strong')?.textContent);
-    const source = riderName === 'You'
-      ? canonicalSnapshot.locations.find((entry) => entry.memberId === canonicalSnapshot.selfMemberId)
-      : byName.get(riderName);
-    const mph = speedMph(source?.speed);
+    const name = clean(label.querySelector('strong')?.textContent);
+    const mph = speeds.get(name);
     let detail = label.querySelector('small');
 
-    if (mph == null) {
+    if (!mph) {
       if (detail?.dataset.rydePolish === 'speed') detail.remove();
       continue;
     }
@@ -71,69 +59,41 @@ function decorateMiniMapLabels() {
       detail.dataset.rydePolish = 'speed';
       label.appendChild(detail);
     }
-    detail.textContent = `${mph.toFixed(0)} mph`;
+    detail.textContent = mph.toLowerCase();
   }
 }
 
 function decorateDashboard() {
-  decorateCrewStrip();
-  decorateMiniMapLabels();
+  if (typeof document === 'undefined') return;
+  const speeds = mapSpeedsByUniqueName();
+  decorateCrewStrip(speeds);
+  decorateMiniMapLabels(speeds);
 }
 
 function queueDecorate() {
-  if (decorateQueued) return;
+  if (decorateQueued || typeof document === 'undefined') return;
   decorateQueued = true;
-  requestAnimationFrame(() => {
+  const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (callback) => setTimeout(callback, 0);
+  schedule(() => {
     decorateQueued = false;
     decorateDashboard();
   });
 }
 
-CrewMap.prototype.setLocations = function setLocationsWithRiderPolish(locations, options = {}) {
-  const list = Array.isArray(locations) ? locations : [];
-  const elementId = this.el?.id || '';
-
-  if (elementId === 'crewMap') {
-    canonicalSnapshot = {
-      locations: list.map((entry) => ({ ...entry })),
-      members: Array.isArray(options.members) ? options.members.map((member) => ({ ...member })) : [],
-      selfMemberId: options.selfMemberId || null
-    };
-    const result = originalSetLocations.call(this, locations, options);
-    queueDecorate();
-    return result;
-  }
-
-  if (elementId === 'dashMiniMap' && canonicalSnapshot.locations.length) {
-    const byName = locationsByUniqueName();
-    const enhanced = list.map((entry) => {
-      const source = byName.get(clean(entry.name));
-      if (!source) return entry;
-      return {
-        ...entry,
-        speed: source.speed,
-        heading: source.heading,
-        receivedAt: source.receivedAt || source.serverTs || entry.receivedAt
-      };
-    });
-    const result = originalSetLocations.call(this, enhanced, options);
-    queueDecorate();
-    return result;
-  }
-
-  return originalSetLocations.call(this, locations, options);
-};
-
-const observer = new MutationObserver(queueDecorate);
 function initializeRiderPolish() {
+  if (typeof document === 'undefined') return;
   installPolishStyles();
-  observer.observe(document.body, { childList: true, subtree: true });
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(queueDecorate).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
   queueDecorate();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeRiderPolish, { once: true });
-} else {
-  initializeRiderPolish();
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeRiderPolish, { once: true });
+  } else {
+    initializeRiderPolish();
+  }
 }
-window.addEventListener('rydesync:self-location', queueDecorate);
+if (typeof window !== 'undefined') window.addEventListener('rydesync:self-location', queueDecorate);
