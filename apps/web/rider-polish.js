@@ -5,6 +5,14 @@ const originalSetLocations = CrewMap.prototype.setLocations;
 let canonicalSnapshot = { locations: [], members: [], selfMemberId: null };
 let decorateQueued = false;
 
+function installPolishStyles() {
+  if (document.querySelector('link[href="/rider-polish.css"]')) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = '/rider-polish.css';
+  document.head.appendChild(link);
+}
+
 function clean(value) {
   return String(value || '').trim();
 }
@@ -118,6 +126,7 @@ CrewMap.prototype.setLocations = function setLocationsWithRiderPolish(locations,
 
 const observer = new MutationObserver(queueDecorate);
 function initializeRiderPolish() {
+  installPolishStyles();
   observer.observe(document.body, { childList: true, subtree: true });
   queueDecorate();
 }
