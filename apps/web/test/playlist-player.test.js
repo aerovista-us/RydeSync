@@ -21,6 +21,15 @@ test('playlists expose an obvious shared-player start path', () => {
   assert.match(libraryUi, /requestTrackPlayback/);
 });
 
+test('shared player contains playlist selection and queue transport controls', () => {
+  assert.match(libraryUi, /playlistPlayerControls/);
+  assert.match(libraryUi, /playerPlaylistSelect/);
+  assert.match(libraryUi, /playerPlaylistPlay/);
+  assert.match(libraryUi, /playerPlaylistPrevious/);
+  assert.match(libraryUi, /playerPlaylistNext/);
+  assert.match(libraryUi, /playerPlaylistStop/);
+});
+
 test('playlist playback reuses the existing canonical room playback authority', () => {
   assert.match(libraryUi, /className = 'track-sync'/);
   assert.match(appJs, /\.track-sync/);
