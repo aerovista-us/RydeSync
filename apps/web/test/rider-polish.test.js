@@ -14,11 +14,11 @@ test('dashboard loads the rider polish layer and PWA caches it', () => {
   assert.match(swJs, /rider-polish\.css/);
 });
 
-test('dashboard rider MPH reuses canonical CrewMap location snapshots', () => {
-  assert.match(polishJs, /CrewMap\.prototype\.setLocations/);
-  assert.match(polishJs, /elementId === 'crewMap'/);
-  assert.match(polishJs, /elementId === 'dashMiniMap'/);
-  assert.match(polishJs, /2\.2369362921/);
+test('dashboard rider MPH reuses the canonical Map labels without a second location watcher', () => {
+  assert.match(polishJs, /#crewMap \.map-label/);
+  assert.match(polishJs, /#dashCrewStrip \.dashboard-crew-chip/);
+  assert.match(polishJs, /#dashMiniMap \.map-label/);
+  assert.match(polishJs, /MPH_PATTERN/);
   assert.match(polishJs, /MPH/);
   assert.doesNotMatch(polishJs, /watchPosition/);
 });
