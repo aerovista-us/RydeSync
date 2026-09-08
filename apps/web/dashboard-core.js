@@ -1,3 +1,5 @@
+import './rider-polish.js';
+
 export function cleanText(value, fallback = '—') {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   return text || fallback;

@@ -1,0 +1,52 @@
+/* Rider readability + viewport safety polish */
+:root{
+  --ryde-safe-top:env(safe-area-inset-top,0px);
+  --ryde-safe-right:env(safe-area-inset-right,0px);
+  --ryde-safe-bottom:env(safe-area-inset-bottom,0px);
+  --ryde-safe-left:env(safe-area-inset-left,0px)
+}
+
+.map-label{padding:7px 9px;border-radius:9px}
+.map-label strong{font-size:14px;line-height:1.15}
+.map-label small{display:block;margin-top:3px;font-size:11px;font-weight:800;letter-spacing:.02em}
+.map-empty{font-size:13px}
+.map-caption{font-size:13px;line-height:1.45}
+.member-list strong,.location-list strong{font-size:15px}
+.member-list small,.location-list small{font-size:11px;line-height:1.35}
+
+#dashboardView .dashboard-mini-map .map-label strong{font-size:14px}
+#dashboardView .dashboard-mini-map .map-label small{display:block!important;font-size:11px}
+#dashboardView .dashboard-status{font-size:10px}
+#dashboardView .dashboard-crew-chip strong{font-size:12px}
+#dashboardView .dashboard-crew-chip small{display:block;font-size:9px}
+#dashboardView .dashboard-crew-speed{color:#b8e3eb!important;font-weight:800}
+
+@media(max-width:760px){
+  body:not(.dashboard-active){scroll-padding-top:calc(72px + var(--ryde-safe-top));scroll-padding-bottom:calc(28px + var(--ryde-safe-bottom))}
+  body:not(.dashboard-active) .shell{padding-top:calc(22px + var(--ryde-safe-top));padding-right:var(--ryde-safe-right);padding-bottom:calc(28px + var(--ryde-safe-bottom));padding-left:var(--ryde-safe-left)}
+  body:not(.dashboard-active) .app-nav{top:calc(6px + var(--ryde-safe-top))}
+  body:not(.dashboard-active) .app-view{scroll-margin-top:calc(72px + var(--ryde-safe-top))}
+  #roomView .realtime-panel{padding-bottom:calc(24px + var(--ryde-safe-bottom))}
+  #roomView .map-actions .mini{min-height:44px;padding:9px 12px;font-size:13px}
+  #roomView .map-icon{min-width:44px;font-size:20px}
+  #roomView .crew-map{min-height:360px}
+}
+
+@media(max-width:600px){
+  body.dashboard-active .app-nav-item{font-size:10px}
+  #dashboardView .dashboard-cockpit-head{top:calc(12px + var(--ryde-safe-top));left:14px;right:14px}
+  #dashboardView .dashboard-cockpit-head h2{font-size:17px}
+  #dashboardView .dashboard-live-state .dashboard-status{min-height:32px;padding:6px 10px;font-size:10px}
+  #dashboardView .dashboard-speed{top:calc(64px + var(--ryde-safe-top))}
+  #dashboardView .dashboard-speed span{font-size:10px}
+  #dashboardView .dashboard-mode-settings{top:calc(64px + var(--ryde-safe-top));width:44px;height:44px}
+  #dashboardView .dashboard-health{top:calc(116px + var(--ryde-safe-top))}
+  #dashboardView .dashboard-crew-strip{right:104px;bottom:76px;min-height:48px;padding:6px 7px}
+  #dashboardView .dashboard-crew-chip{grid-template-columns:7px auto;grid-template-rows:auto auto;padding:7px 9px}
+  #dashboardView .dashboard-crew-chip i{grid-row:1/3}
+  #dashboardView .dashboard-crew-chip strong{font-size:11px}
+  #dashboardView .dashboard-crew-chip small{display:block;margin-top:2px;font-size:9px}
+  #dashboardView .dashboard-voice-card{right:14px;bottom:80px;width:82px;height:82px}
+  #dashboardView .dashboard-ptt{width:82px;height:82px;min-height:82px}
+  #dashboardView .dashboard-ptt span{font-size:12px}
+}
