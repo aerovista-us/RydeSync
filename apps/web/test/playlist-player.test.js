@@ -1,10 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const libraryUi = await fs.readFile(new URL('../library-ui.js', import.meta.url), 'utf8');
+const libraryUiUrl = new URL('../library-ui.js', import.meta.url);
+const libraryUi = await fs.readFile(libraryUiUrl, 'utf8');
 const appJs = await fs.readFile(new URL('../app.js', import.meta.url), 'utf8');
 const swJs = await fs.readFile(new URL('../sw.js', import.meta.url), 'utf8');
+
+test('playlist UI module parses cleanly', () => {
+  execFileSync(process.execPath, ['--check', fileURLToPath(libraryUiUrl)], { stdio: 'pipe' });
+});
 
 test('playlists expose an obvious shared-player start path', () => {
   assert.match(libraryUi, /Play playlist/);
