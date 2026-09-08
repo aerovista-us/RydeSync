@@ -177,6 +177,85 @@ function queueStatus(playlist) {
   return `<div class="playlist-flash">Queued ${state.queue.index + 1} of ${state.queue.trackIds.length} · ${escapeHtml(current?.title || currentId)}</div>`;
 }
 
+function installPlayerPlaylistControls() {
+  if ($('#playlistPlayerControls')) return;
+  const playbackPanel = playbackControls?.closest('.playback-panel');
+  if (!playbackPanel) return;
+  const surface = document.createElement('div');
+  surface.id = 'playlistPlayerControls';
+  surface.className = 'playlist-summary';
+  surface.innerHTML = `
+    <div class="card-kicker">PLAYLIST QUEUE</div>
+    <label>Playlist<select id="playerPlaylistSelect" aria-label="Playlist to play"></select></label>
+    <div class="playlist-summary-actions">
+      <button id="playerPlaylistPlay" type="button" class="mini">Play playlist</button>
+      <button id="playerPlaylistPrevious" type="button" class="mini secondary">Previous</button>
+      <button id="playerPlaylistNext" type="button" class="mini secondary">Next</button>
+      <button id="playerPlaylistStop" type="button" class="mini secondary">Stop queue</button>
+    </div>
+    <small id="playerPlaylistStatus" class="playback-meta">Choose a playlist to queue in the shared player.</small>`;
+  const listenerControls = playbackPanel.querySelector('.listener-controls');
+  if (listenerControls) listenerControls.before(surface);
+  else playbackPanel.appendChild(surface);
+
+  $('#playerPlaylistSelect')?.addEventListener('change', (event) => {
+    state.activePlaylistId = event.currentTarget.value || null;
+    persistPlaylists();
+    renderPlaylist();
+  });
+  $('#playerPlaylistPlay')?.addEventListener('click', () => startPlaylistQueue());
+  $('#playerPlaylistPrevious')?.addEventListener('click', () => advanceQueue(-1));
+  $('#playerPlaylistNext')?.addEventListener('click', () => advanceQueue(1));
+  $('#playerPlaylistStop')?.addEventListener('click', () => {
+    stopQueue();
+    renderPlaylist();
+  });
+}
+
+function renderPlayerPlaylistControls() {
+  const select = $('#playerPlaylistSelect');
+  const play = $('#playerPlaylistPlay');
+  const previous = $('#playerPlaylistPrevious');
+  const nextButton = $('#playerPlaylistNext');
+  const stop = $('#playerPlaylistStop');
+  const status = $('#playerPlaylistStatus');
+  if (!select || !play || !previous || !nextButton || !stop || !status) return;
+
+  const playlist = activePlaylist();
+  if (!state.playlists.length) {
+    select.innerHTML = '<option value="">No playlists yet</option>';
+    select.value = '';
+    select.disabled = true;
+  } else {
+    select.disabled = false;
+    select.innerHTML = state.playlists.map((candidate) => `<option value="${escapeHtml(candidate.id)}">${escapeHtml(candidate.name)} · ${candidate.trackIds.length}</option>`).join('');
+    select.value = state.activePlaylistId || state.playlists[0].id;
+  }
+
+  const playableIds = playableTrackIds(playlist);
+  const queueActive = Boolean(state.queue.active);
+  play.disabled = !playlist || !playableIds.length || !canControlPlayback();
+  play.textContent = queueActive && state.queue.playlistId === playlist?.id ? 'Restart playlist' : 'Play playlist';
+  previous.disabled = !queueActive || !canControlPlayback();
+  nextButton.disabled = !queueActive || !canControlPlayback();
+  stop.disabled = !queueActive;
+
+  if (queueActive) {
+    const queuedPlaylist = state.playlists.find((candidate) => candidate.id === state.queue.playlistId);
+    const currentId = state.queue.trackIds[state.queue.index];
+    const current = trackById(currentId);
+    status.textContent = `${queuedPlaylist?.name || 'Playlist'} · ${state.queue.index + 1}/${state.queue.trackIds.length} · ${current?.title || currentId}`;
+  } else if (!playlist) {
+    status.textContent = 'Create a playlist, then queue it here.';
+  } else if (!canControlPlayback()) {
+    status.textContent = 'Host or co-host playback control is required to start this playlist.';
+  } else if (!playableIds.length) {
+    status.textContent = 'This playlist has no tracks available in the current EchoVerse catalog.';
+  } else {
+    status.textContent = `${playableIds.length} playable track${playableIds.length === 1 ? '' : 's'} ready to queue.`;
+  }
+}
+
 function renderTrackCard(track, selectedIds) {
   const id = trackKey(track);
   const title = track.title || 'Untitled track';
@@ -229,6 +308,7 @@ function renderPlaylistSelect() {
 
 function renderPlaylist() {
   renderPlaylistSelect();
+  renderPlayerPlaylistControls();
   const playlist = activePlaylist();
   if (!playlist) {
     playlistSummary.className = 'playlist-summary muted';
@@ -406,6 +486,7 @@ new MutationObserver(() => {
 }).observe(playbackControls, { attributes: true, attributeFilter: ['hidden'] });
 
 window.addEventListener('rydesync:catalog', (event) => acceptCatalog(event.detail));
+installPlayerPlaylistControls();
 loadPlaylistState();
 renderPlaylist();
 if (window.__rydesyncCatalog) acceptCatalog(window.__rydesyncCatalog);
