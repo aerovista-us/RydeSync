@@ -110,3 +110,13 @@
   #dashboardView[data-ryde-mode="band_practice"] .dashboard-speed{opacity:.58}
   #dashboardView[data-ryde-mode="listening_party"] .dashboard-music-card{border-top-color:#2b6672}
 }
+
+/* Mobile stability: avoid expensive compositor effects on the fixed cockpit. */
+@media(max-width:600px){
+  body.dashboard-active *{
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+  }
+  #dashboardView .dashboard-music-card{transition:none!important}
+  #dashboardView .map-tiles img{filter:none!important}
+}

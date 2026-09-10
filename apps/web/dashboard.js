@@ -12,6 +12,7 @@ const voiceObserved = {
 let miniMap = null;
 let miniMapPromise = null;
 let lastMapSignature = '';
+let lastCrewSignature = '';
 let dashboardTalkActive = false;
 let smoothedSpeedMph = null;
 let musicDrawerOpen = false;
@@ -208,16 +209,18 @@ function toneFor(value) {
 
 function setValue(id, value) {
   const element = $(`#${id}`);
-  if (element) element.textContent = value;
+  if (!element) return;
+  const next = String(value ?? '');
+  if (element.textContent !== next) element.textContent = next;
 }
 
 function setStatus(id, value) {
   const element = $(`#${id}`);
   if (!element) return;
-  element.textContent = value;
-  element.classList.remove('online', 'warn', 'error');
+  const next = String(value ?? '');
+  if (element.textContent !== next) element.textContent = next;
   const tone = toneFor(value);
-  if (tone) element.classList.add(tone);
+  for (const name of ['online', 'warn', 'error']) element.classList.toggle(name, name === tone);
 }
 
 function renderCrewStrip() {
@@ -226,6 +229,9 @@ function renderCrewStrip() {
   const members = crewMembers();
   const online = members.filter((member) => member.online);
   setValue('dashCrewCount', `${online.length} online`);
+  const signature = JSON.stringify(members.map(({ name, role, online: isOnline }) => [name, role, isOnline]));
+  if (signature === lastCrewSignature) return;
+  lastCrewSignature = signature;
   if (!members.length) {
     container.innerHTML = '<span class="dashboard-crew-empty">No crew online yet</span>';
     return;
@@ -355,16 +361,10 @@ async function permissionState(name) {
   } catch { return 'unknown'; }
 }
 
-async function applyModePreferences({ userInitiated = false } = {}) {
-  const mode = activeRoomMode();
-  const prefs = modePreferences(mode);
+async function applyModePreferences() {
   const mic = await permissionState('microphone');
   const geo = await permissionState('geolocation');
   setValue('dashPermissionState', `Microphone ${mic} · Location ${geo}`);
-  const voiceEnable = sourceButton('voiceEnable');
-  const locationToggle = sourceButton('locationToggle');
-  if (prefs.autoPtt && voiceEnable && !/disable|stop/i.test(voiceEnable.textContent || '') && (userInitiated || mic === 'granted')) voiceEnable.click();
-  if (prefs.autoLocation && locationToggle && !/stop/i.test(locationToggle.textContent || '') && (userInitiated || geo === 'granted')) locationToggle.click();
 }
 
 function renderModeControls() {
@@ -387,8 +387,13 @@ function setDashboardActiveClass() {
 }
 
 function renderDashboard() {
-  const roomActive = visibleRoom();
+  const view = $('#dashboardView');
   setDashboardActiveClass();
+  if (!view || view.hidden) {
+    lastModePreferenceKey = '';
+    return;
+  }
+  const roomActive = visibleRoom();
   renderModeControls();
   const preferenceSession = activeRoomSession();
   const preferenceKey = `${preferenceSession?.room?.id || 'none'}:${activeRoomMode()}`;
@@ -549,4 +554,3 @@ window.addEventListener('hashchange', renderDashboard);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) renderDashboard(); });
 setInterval(renderDashboard, 1500);
 renderDashboard();
-setTimeout(() => applyModePreferences(), 500);

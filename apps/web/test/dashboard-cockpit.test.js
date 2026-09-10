@@ -44,3 +44,19 @@ test('dashboard speed is sourced from the canonical location watcher rather than
   assert.doesNotMatch(dashboardJs, /watchPosition/);
   assert.match(dashboardJs, /2\.2369362921/);
 });
+
+test('hidden dashboard does not run cockpit rendering or automatic device actions', () => {
+  assert.match(dashboardJs, /if \(!view \|\| view\.hidden\) \{[\s\S]*?return;[\s\S]*?\}\n  const roomActive/);
+  const start = dashboardJs.indexOf('async function applyModePreferences');
+  const end = dashboardJs.indexOf('function renderModeControls', start);
+  const preferenceBlock = dashboardJs.slice(start, end);
+  assert.doesNotMatch(preferenceBlock, /\.click\(/);
+});
+
+test('dashboard rendering suppresses repeat DOM churn and mobile compositor effects', () => {
+  assert.match(dashboardJs, /element\.textContent !== next/);
+  assert.match(dashboardJs, /lastCrewSignature/);
+  assert.match(dashboardCss, /body\.dashboard-active \*\{[\s\S]*backdrop-filter:none!important/);
+  assert.match(dashboardCss, /dashboard-music-card\{transition:none!important\}/);
+  assert.match(dashboardCss, /map-tiles img\{filter:none!important\}/);
+});

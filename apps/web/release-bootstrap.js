@@ -1,4 +1,4 @@
-const RELEASE_ID = '2026-09-09.2';
+const RELEASE_ID = '2026-09-09.3';
 const RELEASE_KEY = 'rydesync:release-id';
 const RELEASE_PARAM = '_ryde_release';
 
