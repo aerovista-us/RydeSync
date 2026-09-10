@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rydesync-shell-2026-09-08-2';
+const CACHE_NAME = 'rydesync-shell-2026-09-09-1';
 const SHELL_ASSETS = [
   '/',
   '/offline.html',
@@ -47,16 +47,15 @@ function protectedNetworkPath(pathname) {
 
 async function shellResponse(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: true });
-  if (cached) {
-    fetch(request).then((response) => {
-      if (response.ok && response.type === 'basic') cache.put(request, response.clone());
-    }).catch(() => {});
-    return cached;
+  try {
+    const response = await fetch(request);
+    if (response.ok && response.type === 'basic') await cache.put(request, response.clone());
+    return response;
+  } catch (error) {
+    const cached = await cache.match(request, { ignoreSearch: true });
+    if (cached) return cached;
+    throw error;
   }
-  const response = await fetch(request);
-  if (response.ok && response.type === 'basic') cache.put(request, response.clone());
-  return response;
 }
 
 self.addEventListener('fetch', (event) => {
