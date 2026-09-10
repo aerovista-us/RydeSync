@@ -59,6 +59,17 @@ test('PWA manifest and shell assets are publicly served with installable metadat
   });
 });
 
+
+test('browser shell JavaScript and CSS are never edge-cached across releases', async () => {
+  await withServer(async (base) => {
+    for (const pathname of ['/release-bootstrap.js', '/app.js', '/dashboard.js', '/rider-polish.js', '/styles.css', '/rider-polish.css']) {
+      const response = await fetch(`${base}${pathname}`);
+      assert.equal(response.status, 200, `${pathname} should be served`);
+      assert.match(response.headers.get('cache-control') || '', /no-store/);
+    }
+  });
+});
+
 test('service worker uses network-first shell refresh while keeping an offline fallback', async () => {
   const sw = await fs.readFile(new URL('../sw.js', import.meta.url), 'utf8');
   assert.match(sw, /rydesync-shell-/);
