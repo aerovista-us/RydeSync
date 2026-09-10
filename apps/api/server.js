@@ -32,7 +32,7 @@ async function serveWebFile(res, fileName) {
   const headers = {
     'content-type': webContentType(fileName),
     'content-length': content.length,
-    'cache-control': ['index.html', 'release-bootstrap.js', 'sw.js'].includes(fileName) ? 'no-store, max-age=0' : 'no-cache'
+    'cache-control': /\.(?:js|css)$/.test(fileName) || ['index.html', 'release-bootstrap.js', 'sw.js'].includes(fileName) ? 'no-store, max-age=0' : 'no-cache'
   };
   if (fileName === 'sw.js') headers['service-worker-allowed'] = '/';
   res.writeHead(200, headers);
@@ -270,6 +270,8 @@ export function createApp(config = loadConfig()) {
       '/dashboard.js',
       '/dashboard-core.js',
       '/dashboard.css',
+      '/rider-polish.js',
+      '/rider-polish.css',
       '/catalog-bridge.js',
       '/library-ui.js',
       '/library-core.js',
