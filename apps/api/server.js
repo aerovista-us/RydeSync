@@ -32,7 +32,7 @@ async function serveWebFile(res, fileName) {
   const headers = {
     'content-type': webContentType(fileName),
     'content-length': content.length,
-    'cache-control': 'no-cache'
+    'cache-control': ['index.html', 'release-bootstrap.js', 'sw.js'].includes(fileName) ? 'no-store, max-age=0' : 'no-cache'
   };
   if (fileName === 'sw.js') headers['service-worker-allowed'] = '/';
   res.writeHead(200, headers);
@@ -282,6 +282,7 @@ export function createApp(config = loadConfig()) {
       '/audio-engine.js',
       '/voice.js',
       '/pwa.js',
+      '/release-bootstrap.js',
       '/sw.js',
       '/manifest.webmanifest',
       '/offline.html',

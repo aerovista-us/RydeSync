@@ -38,6 +38,7 @@ test('PWA manifest and shell assets are publicly served with installable metadat
     for (const [pathname, contentType] of [
       ['/sw.js', /^text\/javascript/],
       ['/pwa.js', /^text\/javascript/],
+      ['/release-bootstrap.js', /^text\/javascript/],
       ['/offline.html', /^text\/html/],
       ['/icon.svg', /^image\/svg\+xml/],
       ['/icon-maskable.svg', /^image\/svg\+xml/]
@@ -50,10 +51,15 @@ test('PWA manifest and shell assets are publicly served with installable metadat
 
     const sw = await fetch(`${base}/sw.js`);
     assert.equal(sw.headers.get('service-worker-allowed'), '/');
+    assert.match(sw.headers.get('cache-control') || '', /no-store/);
+    const root = await fetch(`${base}/`);
+    assert.match(root.headers.get('cache-control') || '', /no-store/);
+    const releaseBootstrap = await fetch(`${base}/release-bootstrap.js`);
+    assert.match(releaseBootstrap.headers.get('cache-control') || '', /no-store/);
   });
 });
 
-test('service worker caches only the static shell and leaves live/auth/media routes network-only', async () => {
+test('service worker uses network-first shell refresh while keeping an offline fallback', async () => {
   const sw = await fs.readFile(new URL('../sw.js', import.meta.url), 'utf8');
   assert.match(sw, /rydesync-shell-/);
   assert.match(sw, /pathname\.startsWith\('\/v1\/'\)/);
@@ -61,6 +67,23 @@ test('service worker caches only the static shell and leaves live/auth/media rou
   assert.doesNotMatch(sw, /\/v1\/echoverse\/audio\/.+SHELL_ASSETS/s);
   assert.match(sw, /request\.mode === 'navigate'/);
   assert.match(sw, /caches\.match\('\/offline\.html'\)/);
+  assert.match(sw, /try \{[\s\S]*await fetch\(request\)[\s\S]*cache\.match\(request, \{ ignoreSearch: true \}\)/);
+  assert.doesNotMatch(sw, /release-bootstrap\.js/);
+});
+
+
+test('release bootstrap breaks stale mobile PWA caches before loading app modules', async () => {
+  const html = await fs.readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const boot = await fs.readFile(new URL('../release-bootstrap.js', import.meta.url), 'utf8');
+  assert.match(html, /src="\/release-bootstrap\.js"/);
+  assert.doesNotMatch(html, /<script[^>]+src="\/(?:catalog-bridge|app|ui-shell|library-ui)\.js"/);
+  assert.match(boot, /rydesync:release-id/);
+  assert.match(boot, /getRegistrations\(\)/);
+  assert.match(boot, /registration\.unregister\(\)/);
+  assert.match(boot, /key\.startsWith\('rydesync-shell-'\)/);
+  assert.match(boot, /caches\.delete\(key\)/);
+  assert.match(boot, /location\.replace\(url\)/);
+  assert.match(boot, /import\(`\/app\.js\?release=/);
 });
 
 test('PWA bootstrap is additive and update activation remains user-triggered', async () => {
