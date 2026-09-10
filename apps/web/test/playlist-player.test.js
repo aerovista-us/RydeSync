@@ -51,6 +51,6 @@ test('starting a playlist arms local listening and advances on track end', () =>
 test('playlist player remains host\/co-host gated and PWA refreshable', () => {
   assert.match(libraryUi, /canControlPlayback\(\)/);
   assert.match(libraryUi, /playableIds\.length && canControlPlayback\(\)/);
-  assert.match(swJs, /rydesync-shell-2026-09-09-2/);
+  assert.match(swJs, /rydesync-shell-2026-09-09-3/);
   assert.match(swJs, /\/library-ui\.js/);
 });

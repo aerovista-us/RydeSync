@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rydesync-shell-2026-09-09-2';
+const CACHE_NAME = 'rydesync-shell-2026-09-09-3';
 const SHELL_ASSETS = [
   '/',
   '/offline.html',
