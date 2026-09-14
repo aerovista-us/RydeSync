@@ -72,6 +72,6 @@ test('dashboard approve-all uses existing controls and never toggles active feat
 
 test('mobile dashboard reserves a nav-safe viewport and exposes six destinations', () => {
   assert.match(dashboardCss, /grid-template-columns:repeat\(6,1fr\)/);
-  assert.match(dashboardCss, /calc\(60px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(dashboardCss, /top:auto;bottom:0;height:calc\(60px \+ env\(safe-area-inset-bottom\)\);min-height:0/);
   assert.match(dashboardCss, /dashboard-voice-card[^{]*\{[^}]*bottom:88px/);
 });
