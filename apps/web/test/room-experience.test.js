@@ -63,3 +63,20 @@ test('room and map are separate navigation surfaces with location owned by map',
   assert.match(mapBlock, /id="locationToggle"/);
   assert.match(shell, /map:\s*'Map'/);
 });
+
+
+test('Map refits canonical crew state after the dedicated hidden view becomes visible', async () => {
+  const uiShell = await fs.readFile(new URL('../ui-shell.js', import.meta.url), 'utf8');
+  const appJs = await fs.readFile(new URL('../app.js', import.meta.url), 'utf8');
+  assert.match(uiShell, /rydesync:view-changed/);
+  assert.match(appJs, /event\.detail\?\.view !== 'map'/);
+  assert.match(appJs, /realtime\?\.locations\?\.size && !crewMap\.userInteracted/);
+  assert.match(appJs, /crewMap\.fitCrew\(\)/);
+});
+
+test('PWA shortcuts expose Room and Map independently', async () => {
+  const manifest = await fs.readFile(new URL('../manifest.webmanifest', import.meta.url), 'utf8');
+  assert.match(manifest, /"name": "Room"[\s\S]*"url": "\/#room"/);
+  assert.match(manifest, /"name": "Crew Map"[\s\S]*"url": "\/#map"/);
+  assert.doesNotMatch(manifest, /Room \+ Map/);
+});

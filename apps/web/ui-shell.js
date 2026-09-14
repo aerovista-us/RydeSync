@@ -133,6 +133,7 @@ function showView(name) {
   }
   const labels = { access: 'Login', ride: 'Ryde', room: 'Room', map: 'Map', music: 'Music', dashboard: 'Dashboard' };
   document.title = `RydeSync · ${labels[target] || 'RydeSync'}`;
+  window.dispatchEvent(new CustomEvent('rydesync:view-changed', { detail: { view: target } }));
 }
 
 function go(name) {
