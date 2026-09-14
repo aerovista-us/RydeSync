@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { issueBrowserSession, browserSessionCookie, browserSessionFromRequest, authStateCookie } from '../lib/browser-session.js';
+import { issueBrowserSession, browserSessionCookie, browserSessionFromRequest, authStateCookie, authStateFromRequest } from '../lib/browser-session.js';
 import { beginBrowserLogin, browserLogout, completeBrowserLogin } from '../lib/browser-auth.js';
 import { serviceHmac } from '../lib/aerocore-app-adapter.js';
 
@@ -49,6 +49,24 @@ test('browser identity session is encrypted and does not expose identity or upst
   const payload = browserSessionFromRequest({ headers: { cookie: `__session=${token}` } }, cfg, Date.UTC(2026, 7, 28));
   assert.equal(payload.principal.identityId, 'identity_secret_123');
   assert.equal(payload.upstreamToken, 'super-secret-upstream-token');
+});
+
+test('parallel sign-in attempts keep independent state cookies and preserve legacy callback compatibility', () => {
+  const cfg = config();
+  const first = authStateCookie('state-first', cfg).split(';')[0];
+  const second = authStateCookie('state-second', cfg).split(';')[0];
+  const [firstName] = first.split('=');
+  const [secondName] = second.split('=');
+  assert.notEqual(firstName, secondName);
+  assert.match(authStateCookie('state-first', cfg), /Max-Age=600/);
+
+  const req = { headers: { cookie: `${first}; ${second}` } };
+  assert.equal(authStateFromRequest(req, 'state-first'), 'state-first');
+  assert.equal(authStateFromRequest(req, 'state-second'), 'state-second');
+  assert.equal(authStateFromRequest(req, 'state-missing'), null);
+
+  const legacy = { headers: { cookie: 'rydesync_auth_state=state-legacy' } };
+  assert.equal(authStateFromRequest(legacy, 'state-legacy'), 'state-legacy');
 });
 
 test('one-time handoff uses the adapter HMAC contract, resolves identity, and creates a local HttpOnly session', async () => {
