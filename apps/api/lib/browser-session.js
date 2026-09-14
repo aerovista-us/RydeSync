@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 const VERSION = 1;
 const COOKIE = '__session';
 const STATE_COOKIE = 'rydesync_auth_state';
+const STATE_COOKIE_PREFIX = `${STATE_COOKIE}_`;
+const AUTH_STATE_MAX_AGE = 600;
 
 function secure(config) {
   try { return new URL(config.publicBaseUrl).protocol === 'https:'; }
@@ -92,20 +94,42 @@ export function clearBrowserSessionCookie(config) {
   return attrs.join('; ');
 }
 
-export function authStateCookie(state, config, maxAge = 300) {
-  const attrs = [`${STATE_COOKIE}=${encodeURIComponent(state)}`, 'Path=/auth/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
+function authStateCookieName(state) {
+  const digest = crypto.createHash('sha256').update(String(state || '')).digest('hex').slice(0, 24);
+  return `${STATE_COOKIE_PREFIX}${digest}`;
+}
+
+function clearCookie(name, config) {
+  const attrs = [`${name}=`, 'Path=/auth/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
   if (secure(config)) attrs.push('Secure');
   return attrs.join('; ');
 }
 
-export function authStateFromRequest(req) {
-  const value = parseCookies(req.headers.cookie).get(STATE_COOKIE);
+export function authStateCookie(state, config, maxAge = AUTH_STATE_MAX_AGE) {
+  const attrs = [`${authStateCookieName(state)}=${encodeURIComponent(state)}`, 'Path=/auth/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
+  if (secure(config)) attrs.push('Secure');
+  return attrs.join('; ');
+}
+
+export function authStateFromRequest(req, state) {
+  if (!state) return null;
+  const cookies = parseCookies(req.headers.cookie);
+  const value = cookies.get(authStateCookieName(state)) ?? cookies.get(STATE_COOKIE);
   if (!value) return null;
   try { return decodeURIComponent(value); } catch { return null; }
 }
 
+export function clearAuthStateCookies(state, config) {
+  return [clearCookie(authStateCookieName(state), config), clearCookie(STATE_COOKIE, config)];
+}
+
+export function clearAuthStateCookiesFromRequest(req, config) {
+  const names = [...parseCookies(req.headers.cookie).keys()]
+    .filter((name) => name === STATE_COOKIE || name.startsWith(STATE_COOKIE_PREFIX));
+  if (!names.includes(STATE_COOKIE)) names.push(STATE_COOKIE);
+  return [...new Set(names)].map((name) => clearCookie(name, config));
+}
+
 export function clearAuthStateCookie(config) {
-  const attrs = [`${STATE_COOKIE}=`, 'Path=/auth/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
-  if (secure(config)) attrs.push('Secure');
-  return attrs.join('; ');
+  return clearCookie(STATE_COOKIE, config);
 }

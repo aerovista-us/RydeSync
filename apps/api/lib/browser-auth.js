@@ -6,7 +6,8 @@ import {
   authStateFromRequest,
   browserSessionCookie,
   browserSessionFromRequest,
-  clearAuthStateCookie,
+  clearAuthStateCookies,
+  clearAuthStateCookiesFromRequest,
   clearBrowserSessionCookie,
   issueBrowserSession
 } from './browser-session.js';
@@ -82,7 +83,7 @@ export async function completeBrowserLogin(req, res, url, config) {
     throw new HttpError(503, 'login_not_configured', 'AeroVista sign-in handoff is not configured for RydeSync');
   }
   const state = url.searchParams.get('state');
-  const expectedState = authStateFromRequest(req);
+  const expectedState = authStateFromRequest(req, state);
   if (!state || !expectedState || state !== expectedState) {
     throw new HttpError(400, 'invalid_auth_state', 'AeroVista sign-in state did not match this browser session');
   }
@@ -112,7 +113,7 @@ export async function completeBrowserLogin(req, res, url, config) {
   const destination = new URL(next, config.publicBaseUrl);
   destination.searchParams.set('signed_in', '1');
   return redirect(res, `${destination.pathname}${destination.search}`, {
-    'set-cookie': [browserSessionCookie(session, config), clearAuthStateCookie(config)]
+    'set-cookie': [browserSessionCookie(session, config), ...clearAuthStateCookies(state, config)]
   });
 }
 
@@ -127,5 +128,5 @@ export async function browserLogout(req, res, config) {
       // shared Identity service is temporarily unreachable.
     }
   }
-  return redirect(res, '/', { 'set-cookie': [clearBrowserSessionCookie(config), clearAuthStateCookie(config)] });
+  return redirect(res, '/', { 'set-cookie': [clearBrowserSessionCookie(config), ...clearAuthStateCookiesFromRequest(req, config)] });
 }
