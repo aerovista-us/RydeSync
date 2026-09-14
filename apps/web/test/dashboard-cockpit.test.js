@@ -60,3 +60,18 @@ test('dashboard rendering suppresses repeat DOM churn and mobile compositor effe
   assert.match(dashboardCss, /dashboard-music-card\{transition:none!important\}/);
   assert.match(dashboardCss, /map-tiles img\{filter:none!important\}/);
 });
+
+
+test('dashboard approve-all uses existing controls and never toggles active features off', () => {
+  for (const id of ['dashApproveAll', 'voiceEnable', 'locationToggle', 'audioListenToggle']) assert.match(dashboardJs, new RegExp(id));
+  assert.match(dashboardJs, /function approveAllFeatures\(\)/);
+  assert.match(dashboardJs, /!\/disable\|stop\/i\.test\(voice\.textContent/);
+  assert.match(dashboardJs, /!\/stop\/i\.test\(location\.textContent/);
+  assert.match(dashboardJs, /!\/stop\/i\.test\(music\.textContent/);
+});
+
+test('mobile dashboard reserves a nav-safe viewport and exposes six destinations', () => {
+  assert.match(dashboardCss, /grid-template-columns:repeat\(6,1fr\)/);
+  assert.match(dashboardCss, /calc\(60px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(dashboardCss, /dashboard-voice-card[^{]*\{[^}]*bottom:88px/);
+});

@@ -391,7 +391,7 @@
       <p id="activeRydeStatus" class="active-ryde-status">This device has an active room session.</p>
       <div class="active-ryde-meta"><span id="activeRydeCode">JOIN —</span><span id="activeRydeRole">ROLE —</span></div>
       <div class="active-ryde-actions">
-        <button id="activeRydeOpen" type="button">Open Room + Map</button>
+        <button id="activeRydeOpen" type="button">Open Room</button>
         <button id="activeRydeMusic" type="button" class="secondary">Music</button>
         <button id="activeRydeSave" type="button" class="mini secondary">Save room</button>
         <button id="activeRydeLeave" type="button" class="mini danger">Leave room</button>

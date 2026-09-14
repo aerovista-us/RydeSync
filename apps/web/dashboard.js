@@ -79,11 +79,12 @@ function installCockpit() {
           </div>
           <div class="dashboard-map-actions">
             <span id="dashLocationStatus" class="dashboard-status">Location off</span>
-            <button type="button" class="mini" data-dashboard-jump="room">Open map</button>
+            <button type="button" class="mini" data-dashboard-jump="map">Open map</button>
           </div>
         </div>
         <div id="dashMiniMap" class="crew-map dashboard-mini-map" role="img" aria-label="Condensed live crew map"></div>
         <div class="dashboard-speed" aria-label="Current device speed"><strong id="dashSpeed">--</strong><span>MPH</span></div>
+        <button id="dashApproveAll" type="button" class="dashboard-approve-all" aria-describedby="dashApproveStatus"><strong>Approve all</strong><small id="dashApproveStatus">PTT · Location · Music</small></button>
         <button id="dashModeSettings" type="button" class="dashboard-mode-settings" aria-label="Room mode preferences">⚙</button>
         <div id="dashCrewStrip" class="dashboard-crew-strip" aria-live="polite">
           <span class="dashboard-crew-empty">No crew online yet</span>
@@ -139,6 +140,7 @@ function installCockpit() {
     <section id="dashModeSheet" class="dashboard-mode-sheet" hidden>
       <div class="dashboard-mode-sheet-head"><div><span class="card-kicker">ROOM MODE</span><strong id="dashModeLabel">Group Ride</strong></div><button id="dashModeSheetClose" type="button" class="mini">Done</button></div>
       <p>Remember how this device should prepare features when you join this room type. Browser permission still stays under your control.</p>
+      <button id="dashApproveAllSheet" type="button" class="dashboard-approve-sheet">Approve PTT + location + music</button>
       <label class="dashboard-pref"><input id="dashAutoPtt" type="checkbox" /> <span><strong>PTT ready automatically</strong><small>Uses microphone automatically only after browser permission is already granted.</small></span></label>
       <label class="dashboard-pref"><input id="dashAutoLocation" type="checkbox" /> <span><strong>Share location automatically</strong><small>Starts room location sharing automatically only after browser permission is already granted.</small></span></label>
       <small id="dashPermissionState" class="dashboard-permission-state">Permissions checked on this device.</small>
@@ -291,6 +293,39 @@ function proxyClick(id) {
   if (button && !button.disabled) button.click();
 }
 
+function controlIsActive(id, activePattern) {
+  const button = sourceButton(id);
+  return Boolean(button && activePattern.test(button.textContent || ''));
+}
+
+function renderApproveAllState() {
+  const states = [
+    controlIsActive('voiceEnable', /disable|stop/i) || !sourceButton('talkButton')?.disabled,
+    controlIsActive('locationToggle', /stop/i),
+    controlIsActive('audioListenToggle', /stop/i)
+  ];
+  const ready = states.filter(Boolean).length;
+  for (const id of ['dashApproveAll', 'dashApproveAllSheet']) {
+    const button = sourceButton(id);
+    if (!button) continue;
+    button.classList.toggle('online', ready === 3);
+  }
+  setValue('dashApproveStatus', ready === 3 ? 'Ready · 3/3 active' : `${ready}/3 active · tap to enable`);
+}
+
+function approveAllFeatures() {
+  const voice = sourceButton('voiceEnable');
+  const location = sourceButton('locationToggle');
+  const music = sourceButton('audioListenToggle');
+  // Keep these synchronous inside the user gesture so browser permission/audio
+  // gates can attach to the same explicit tap. Already-active controls stay on.
+  if (voice && !voice.disabled && !/disable|stop/i.test(voice.textContent || '')) voice.click();
+  if (location && !location.disabled && !/stop/i.test(location.textContent || '')) location.click();
+  if (music && !music.disabled && !/stop/i.test(music.textContent || '')) music.click();
+  setValue('dashApproveStatus', 'Requesting access…');
+  window.setTimeout(() => { renderApproveAllState(); applyModePreferences(); }, 900);
+}
+
 function forwardTalk(type, sourceEvent = null) {
   const source = sourceButton('talkButton');
   if (!source || source.disabled) return false;
@@ -352,6 +387,7 @@ function syncControlMirrors() {
     dashMute.textContent = sourceMute.textContent;
     dashMute.disabled = sourceMute.disabled;
   }
+  renderApproveAllState();
 }
 
 async function permissionState(name) {
@@ -467,6 +503,8 @@ document.querySelectorAll('[data-dashboard-proxy]').forEach((button) => {
 });
 
 $('#dashVoiceEnable')?.addEventListener('click', () => proxyClick('voiceEnable'));
+$('#dashApproveAll')?.addEventListener('click', approveAllFeatures);
+$('#dashApproveAllSheet')?.addEventListener('click', approveAllFeatures);
 $('#dashListenToggle')?.addEventListener('click', () => proxyClick('audioListenToggle'));
 $('#dashMuteToggle')?.addEventListener('click', () => proxyClick('audioMuteToggle'));
 $('#dashTransportToggle')?.addEventListener('click', () => {

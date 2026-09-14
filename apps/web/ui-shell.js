@@ -14,7 +14,7 @@ function installDashboardShell() {
     button.type = 'button';
     button.className = 'app-nav-item';
     button.dataset.viewTarget = 'dashboard';
-    button.innerHTML = '<span>05</span>Dashboard';
+    button.innerHTML = '<span>06</span>Dashboard';
     nav.append(button);
   }
 
@@ -101,7 +101,7 @@ function installDashboardShell() {
 
       <div class="dashboard-actions">
         <span class="dashboard-actions-label">Existing quick actions</span>
-        <button type="button" class="mini" data-view-jump="room">Open Room + Map</button>
+        <button type="button" class="mini" data-view-jump="room">Open Room</button>
         <button type="button" class="mini secondary" data-view-jump="music">Open Music</button>
         <button type="button" class="mini secondary" data-view-jump="ride">Ryde invite</button>
         <button type="button" class="mini secondary" data-view-jump="access">Access</button>
@@ -131,7 +131,7 @@ function showView(name) {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
-  const labels = { access: 'Login', ride: 'Ryde', room: 'Room + Map', music: 'Music', dashboard: 'Dashboard' };
+  const labels = { access: 'Login', ride: 'Ryde', room: 'Room', map: 'Map', music: 'Music', dashboard: 'Dashboard' };
   document.title = `RydeSync · ${labels[target] || 'RydeSync'}`;
 }
 
@@ -150,6 +150,9 @@ const rideEmpty = document.querySelector('#rideEmpty');
 const rideActions = document.querySelector('#rideActions');
 const realtimePanel = document.querySelector('#realtimePanel');
 const roomEmpty = document.querySelector('#roomEmpty');
+const mapPanel = document.querySelector('#mapPanel');
+const mapEmpty = document.querySelector('#mapEmpty');
+const mapNav = document.querySelector('[data-view-target="map"]');
 const roomNav = document.querySelector('[data-view-target="room"]');
 const createCard = document.querySelector('#createCard');
 let automaticMemberEntryDone = false;
@@ -241,6 +244,9 @@ function syncRideState() {
 function syncRoomState() {
   const connected = realtimePanel && !realtimePanel.classList.contains('hidden');
   if (roomEmpty) roomEmpty.hidden = Boolean(connected);
+  if (mapPanel) mapPanel.classList.toggle('hidden', !connected);
+  if (mapEmpty) mapEmpty.hidden = Boolean(connected);
+  if (mapNav) mapNav.classList.toggle('room-ready', Boolean(connected));
   if (rideActions) rideActions.classList.toggle('hidden', !connected);
   if (roomNav) roomNav.classList.toggle('room-ready', Boolean(connected));
   if (roomNav) {
