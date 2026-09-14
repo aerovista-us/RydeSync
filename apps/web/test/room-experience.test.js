@@ -47,3 +47,19 @@ test('all existing room modes have an intentional presentation profile', () => {
   assert.match(bridge, /roomTitle/);
   assert.match(bridge, /musicTitle/);
 });
+
+
+test('room and map are separate navigation surfaces with location owned by map', async () => {
+  const html = await fs.readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const shell = await fs.readFile(new URL('../ui-shell.js', import.meta.url), 'utf8');
+  const roomStart = html.indexOf('id="roomView"');
+  const mapStart = html.indexOf('id="mapView"');
+  const musicStart = html.indexOf('id="musicView"');
+  const roomBlock = html.slice(roomStart, mapStart);
+  const mapBlock = html.slice(mapStart, musicStart);
+  assert.ok(roomStart >= 0 && mapStart > roomStart && musicStart > mapStart);
+  assert.doesNotMatch(roomBlock, /id="crewMap"|id="locationToggle"/);
+  assert.match(mapBlock, /id="crewMap"/);
+  assert.match(mapBlock, /id="locationToggle"/);
+  assert.match(shell, /map:\s*'Map'/);
+});
