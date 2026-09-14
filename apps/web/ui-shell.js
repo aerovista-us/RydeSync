@@ -14,7 +14,7 @@ function installDashboardShell() {
     button.type = 'button';
     button.className = 'app-nav-item';
     button.dataset.viewTarget = 'dashboard';
-    button.innerHTML = '<span>05</span>Dashboard';
+    button.innerHTML = '<span>06</span>Dash';
     nav.append(button);
   }
 
@@ -101,7 +101,8 @@ function installDashboardShell() {
 
       <div class="dashboard-actions">
         <span class="dashboard-actions-label">Existing quick actions</span>
-        <button type="button" class="mini" data-view-jump="room">Open Room + Map</button>
+        <button type="button" class="mini" data-view-jump="room">Open Room</button>
+        <button type="button" class="mini secondary" data-view-jump="map">Open Map</button>
         <button type="button" class="mini secondary" data-view-jump="music">Open Music</button>
         <button type="button" class="mini secondary" data-view-jump="ride">Ryde invite</button>
         <button type="button" class="mini secondary" data-view-jump="access">Access</button>
@@ -131,8 +132,9 @@ function showView(name) {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
-  const labels = { access: 'Login', ride: 'Ryde', room: 'Room + Map', music: 'Music', dashboard: 'Dashboard' };
+  const labels = { access: 'Login', ride: 'Ryde', room: 'Room', map: 'Map', music: 'Music', dashboard: 'Dashboard' };
   document.title = `RydeSync · ${labels[target] || 'RydeSync'}`;
+  window.dispatchEvent(new CustomEvent('rydesync:view-changed', { detail: { view: target } }));
 }
 
 function go(name) {
@@ -150,7 +152,10 @@ const rideEmpty = document.querySelector('#rideEmpty');
 const rideActions = document.querySelector('#rideActions');
 const realtimePanel = document.querySelector('#realtimePanel');
 const roomEmpty = document.querySelector('#roomEmpty');
+const mapPanel = document.querySelector('#mapPanel');
+const mapEmpty = document.querySelector('#mapEmpty');
 const roomNav = document.querySelector('[data-view-target="room"]');
+const mapNav = document.querySelector('[data-view-target="map"]');
 const createCard = document.querySelector('#createCard');
 let automaticMemberEntryDone = false;
 
@@ -238,20 +243,26 @@ function syncRideState() {
   renderInvite();
 }
 
+function syncReadyNav(button, connected, label) {
+  if (!button) return;
+  button.classList.toggle('room-ready', Boolean(connected));
+  let dot = button.querySelector('.room-ready-dot');
+  if (connected && !dot) {
+    dot = document.createElement('i');
+    dot.className = 'room-ready-dot';
+    dot.setAttribute('aria-label', label);
+    button.append(dot);
+  } else if (!connected && dot) dot.remove();
+}
+
 function syncRoomState() {
   const connected = realtimePanel && !realtimePanel.classList.contains('hidden');
   if (roomEmpty) roomEmpty.hidden = Boolean(connected);
+  if (mapPanel) mapPanel.classList.toggle('hidden', !connected);
+  if (mapEmpty) mapEmpty.hidden = Boolean(connected);
   if (rideActions) rideActions.classList.toggle('hidden', !connected);
-  if (roomNav) roomNav.classList.toggle('room-ready', Boolean(connected));
-  if (roomNav) {
-    let dot = roomNav.querySelector('.room-ready-dot');
-    if (connected && !dot) {
-      dot = document.createElement('i');
-      dot.className = 'room-ready-dot';
-      dot.setAttribute('aria-label', 'Room connected');
-      roomNav.append(dot);
-    } else if (!connected && dot) dot.remove();
-  }
+  syncReadyNav(roomNav, connected, 'Room connected');
+  syncReadyNav(mapNav, connected, 'Map available');
   renderInvite();
 }
 

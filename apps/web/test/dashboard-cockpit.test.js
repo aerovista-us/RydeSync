@@ -60,3 +60,20 @@ test('dashboard rendering suppresses repeat DOM churn and mobile compositor effe
   assert.match(dashboardCss, /dashboard-music-card\{transition:none!important\}/);
   assert.match(dashboardCss, /map-tiles img\{filter:none!important\}/);
 });
+
+
+test('dashboard offers one-tap readiness through canonical PTT, location, and music controls', () => {
+  assert.match(dashboardJs, /dashApproveAll/);
+  for (const sourceId of ['voiceEnable', 'locationToggle', 'audioListenToggle']) assert.ok(dashboardJs.includes(`sourceButton('${sourceId}')`));
+  assert.match(dashboardJs, /Requesting device access/);
+  assert.doesNotMatch(dashboardJs, /navigator\.geolocation\.watchPosition/);
+  assert.doesNotMatch(dashboardJs, /getUserMedia\(/);
+});
+
+test('mobile dashboard reserves a six-item safe navigation zone below cockpit controls', () => {
+  assert.match(dashboardCss, /grid-template-columns:repeat\(6,1fr\)/);
+  assert.match(dashboardCss, /height:calc\(62px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(dashboardCss, /#dashboardView\{[^}]*inset:0 0 calc\(62px \+ env\(safe-area-inset-bottom\)\) 0/);
+  assert.match(dashboardCss, /dashboard-music-card\{[^}]*bottom:8px/);
+  assert.match(dashboardCss, /dashboard-setup-bar/);
+});

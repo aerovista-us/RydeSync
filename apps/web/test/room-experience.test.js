@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
 const bridge = await fs.readFile(new URL('../catalog-bridge.js', import.meta.url), 'utf8');
+const html = await fs.readFile(new URL('../index.html', import.meta.url), 'utf8');
+const uiShell = await fs.readFile(new URL('../ui-shell.js', import.meta.url), 'utf8');
 
 test('stale realtime rooms terminate reconnect and clean the local active session', () => {
   assert.match(bridge, /event\.code === 1006/);
@@ -46,4 +48,29 @@ test('all existing room modes have an intentional presentation profile', () => {
   assert.match(bridge, /createHint/);
   assert.match(bridge, /roomTitle/);
   assert.match(bridge, /musicTitle/);
+});
+
+
+test('Room and Map are separate first-class views while sharing the same realtime authority', () => {
+  assert.match(html, /data-view-target="room"[^>]*><span>03<\/span>Room<\/button>/);
+  assert.match(html, /data-view-target="map"[^>]*><span>04<\/span>Map<\/button>/);
+  assert.match(html, /id="roomView"[\s\S]*id="mapView"/);
+  const roomStart = html.indexOf('id="roomView"');
+  const mapStart = html.indexOf('id="mapView"');
+  const musicStart = html.indexOf('id="musicView"');
+  const roomBlock = html.slice(roomStart, mapStart);
+  const mapBlock = html.slice(mapStart, musicStart);
+  assert.doesNotMatch(roomBlock, /id="crewMap"|id="locationToggle"/);
+  assert.match(mapBlock, /id="crewMap"/);
+  assert.match(mapBlock, /id="locationToggle"/);
+  assert.match(uiShell, /mapPanel/);
+  assert.match(uiShell, /mapEmpty/);
+  assert.match(uiShell, /map:\s*'Map'/);
+});
+
+test('active Ryde actions expose Room and Map independently', () => {
+  assert.match(bridge, /activeRydeOpen/);
+  assert.match(bridge, /activeRydeMap/);
+  assert.match(bridge, /location\.hash = 'room'/);
+  assert.match(bridge, /location\.hash = 'map'/);
 });

@@ -134,6 +134,16 @@ function renderCrewMap({ autoFit = false } = {}) {
   });
 }
 
+window.addEventListener('rydesync:view-changed', (event) => {
+  if (event.detail?.view !== 'map') return;
+  requestAnimationFrame(() => {
+    ensureCrewMap();
+    if (!crewMap) return;
+    if (realtime?.locations?.size && !crewMap.userInteracted) crewMap.fitCrew();
+    else crewMap.render();
+  });
+});
+
 function renderLocations() {
   const list = $('#rtLocations');
   if (!list) return;

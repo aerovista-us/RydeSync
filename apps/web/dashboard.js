@@ -70,6 +70,18 @@ function installCockpit() {
       </div>
     </div>
 
+    <section class="dashboard-setup-bar" aria-label="Device readiness">
+      <div class="dashboard-setup-copy">
+        <span class="card-kicker">ONE-TAP SETUP</span>
+        <strong>Ready this device for the Ryde</strong>
+        <small>PTT, live location, and shared music stay off until you approve them.</small>
+      </div>
+      <div class="dashboard-setup-actions">
+        <span id="dashSetupStatus" class="dashboard-setup-status">PTT off · Location off · Music off</span>
+        <button id="dashApproveAll" type="button" class="dashboard-approve-all">Approve all</button>
+      </div>
+    </section>
+
     <section class="dashboard-cockpit-grid">
       <article class="dashboard-map-card">
         <div class="dashboard-map-topline">
@@ -79,7 +91,7 @@ function installCockpit() {
           </div>
           <div class="dashboard-map-actions">
             <span id="dashLocationStatus" class="dashboard-status">Location off</span>
-            <button type="button" class="mini" data-dashboard-jump="room">Open map</button>
+            <button type="button" class="mini" data-dashboard-jump="map">Open map</button>
           </div>
         </div>
         <div id="dashMiniMap" class="crew-map dashboard-mini-map" role="img" aria-label="Condensed live crew map"></div>
@@ -138,9 +150,9 @@ function installCockpit() {
 
     <section id="dashModeSheet" class="dashboard-mode-sheet" hidden>
       <div class="dashboard-mode-sheet-head"><div><span class="card-kicker">ROOM MODE</span><strong id="dashModeLabel">Group Ride</strong></div><button id="dashModeSheetClose" type="button" class="mini">Done</button></div>
-      <p>Remember how this device should prepare features when you join this room type. Browser permission still stays under your control.</p>
-      <label class="dashboard-pref"><input id="dashAutoPtt" type="checkbox" /> <span><strong>PTT ready automatically</strong><small>Uses microphone automatically only after browser permission is already granted.</small></span></label>
-      <label class="dashboard-pref"><input id="dashAutoLocation" type="checkbox" /> <span><strong>Share location automatically</strong><small>Starts room location sharing automatically only after browser permission is already granted.</small></span></label>
+      <p>Remember your preferred setup for this room type. Startup never opens device permissions automatically; use Approve all or the individual controls when you are ready.</p>
+      <label class="dashboard-pref"><input id="dashAutoPtt" type="checkbox" /> <span><strong>Prefer PTT for this mode</strong><small>Remember this preference. Use Approve all or Enable PTT to activate the microphone.</small></span></label>
+      <label class="dashboard-pref"><input id="dashAutoLocation" type="checkbox" /> <span><strong>Prefer location sharing for this mode</strong><small>Remember this preference. Use Approve all or Share my location to activate sharing.</small></span></label>
       <small id="dashPermissionState" class="dashboard-permission-state">Permissions checked on this device.</small>
     </section>
 
@@ -307,6 +319,27 @@ function stopDashboardTalk(event = null) {
   forwardTalk('pointerup', event);
 }
 
+function setupReadiness() {
+  const sourceTalk = sourceButton('talkButton');
+  const sourceVoice = sourceButton('voiceEnable');
+  const sourceListen = sourceButton('audioListenToggle');
+  const ptt = Boolean(sourceTalk && !sourceTalk.disabled) || /disable ptt/i.test(sourceVoice?.textContent || '');
+  const location = /^sharing/i.test(text('locationStatus', 'Off'));
+  const music = /stop listening/i.test(sourceListen?.textContent || '');
+  return { ptt, location, music, all: ptt && location && music };
+}
+
+function syncSetupReadiness() {
+  const ready = setupReadiness();
+  const status = [ready.ptt ? 'PTT ready' : 'PTT off', ready.location ? 'Location on' : 'Location off', ready.music ? 'Music ready' : 'Music off'].join(' · ');
+  setValue('dashSetupStatus', status);
+  const button = sourceButton('dashApproveAll');
+  if (!button) return;
+  button.textContent = ready.all ? 'All ready' : 'Approve all';
+  button.disabled = !visibleRoom() || ready.all;
+  button.classList.toggle('ready', ready.all);
+}
+
 function syncControlMirrors() {
   const sourceTalk = sourceButton('talkButton');
   const dashTalk = sourceButton('dashPttButton');
@@ -352,6 +385,7 @@ function syncControlMirrors() {
     dashMute.textContent = sourceMute.textContent;
     dashMute.disabled = sourceMute.disabled;
   }
+  syncSetupReadiness();
 }
 
 async function permissionState(name) {
@@ -464,6 +498,23 @@ document.querySelectorAll('[data-dashboard-jump]').forEach((button) => {
 });
 document.querySelectorAll('[data-dashboard-proxy]').forEach((button) => {
   button.addEventListener('click', () => proxyClick(button.dataset.dashboardProxy));
+});
+
+
+$('#dashApproveAll')?.addEventListener('click', () => {
+  const ready = setupReadiness();
+  setValue('dashSetupStatus', 'Requesting device access…');
+  const listen = sourceButton('audioListenToggle');
+  const location = sourceButton('locationToggle');
+  const voice = sourceButton('voiceEnable');
+
+  // Keep this as one explicit user gesture that activates the canonical controls.
+  // Browsers may still show native microphone/location prompts that the rider must accept.
+  if (!ready.music && listen && !listen.disabled) listen.click();
+  if (!ready.location && location && !location.disabled) location.click();
+  if (!ready.ptt && voice && !voice.disabled) voice.click();
+
+  setTimeout(() => { syncSetupReadiness(); applyModePreferences(); }, 350);
 });
 
 $('#dashVoiceEnable')?.addEventListener('click', () => proxyClick('voiceEnable'));

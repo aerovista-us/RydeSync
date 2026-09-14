@@ -391,7 +391,8 @@
       <p id="activeRydeStatus" class="active-ryde-status">This device has an active room session.</p>
       <div class="active-ryde-meta"><span id="activeRydeCode">JOIN —</span><span id="activeRydeRole">ROLE —</span></div>
       <div class="active-ryde-actions">
-        <button id="activeRydeOpen" type="button">Open Room + Map</button>
+        <button id="activeRydeOpen" type="button">Room</button>
+        <button id="activeRydeMap" type="button" class="secondary">Map</button>
         <button id="activeRydeMusic" type="button" class="secondary">Music</button>
         <button id="activeRydeSave" type="button" class="mini secondary">Save room</button>
         <button id="activeRydeLeave" type="button" class="mini danger">Leave room</button>
@@ -399,6 +400,7 @@
     grid.prepend(card);
 
     card.querySelector('#activeRydeOpen').addEventListener('click', () => { location.hash = 'room'; });
+    card.querySelector('#activeRydeMap').addEventListener('click', () => { location.hash = 'map'; });
     card.querySelector('#activeRydeMusic').addEventListener('click', () => { location.hash = 'music'; });
     card.querySelector('#activeRydeSave').addEventListener('click', () => {
       const session = currentSession();
