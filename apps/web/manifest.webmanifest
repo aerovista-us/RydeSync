@@ -16,7 +16,8 @@
   ],
   "shortcuts": [
     { "name": "Dashboard", "short_name": "Dashboard", "url": "/#dashboard" },
-    { "name": "Room + Map", "short_name": "Room", "url": "/#room" },
+    { "name": "Room", "short_name": "Room", "url": "/#room" },
+    { "name": "Crew Map", "short_name": "Map", "url": "/#map" },
     { "name": "Music", "short_name": "Music", "url": "/#music" },
     { "name": "Join or Sign In", "short_name": "Access", "url": "/#access" }
   ],

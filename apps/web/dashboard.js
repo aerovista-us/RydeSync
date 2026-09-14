@@ -139,10 +139,10 @@ function installCockpit() {
 
     <section id="dashModeSheet" class="dashboard-mode-sheet" hidden>
       <div class="dashboard-mode-sheet-head"><div><span class="card-kicker">ROOM MODE</span><strong id="dashModeLabel">Group Ride</strong></div><button id="dashModeSheetClose" type="button" class="mini">Done</button></div>
-      <p>Remember how this device should prepare features when you join this room type. Browser permission still stays under your control.</p>
+      <p>Remember your preferred setup for this room type. Startup never opens device permissions automatically; use Approve all or the individual controls when you are ready.</p>
       <button id="dashApproveAllSheet" type="button" class="dashboard-approve-sheet">Approve PTT + location + music</button>
-      <label class="dashboard-pref"><input id="dashAutoPtt" type="checkbox" /> <span><strong>PTT ready automatically</strong><small>Uses microphone automatically only after browser permission is already granted.</small></span></label>
-      <label class="dashboard-pref"><input id="dashAutoLocation" type="checkbox" /> <span><strong>Share location automatically</strong><small>Starts room location sharing automatically only after browser permission is already granted.</small></span></label>
+      <label class="dashboard-pref"><input id="dashAutoPtt" type="checkbox" /> <span><strong>Prefer PTT for this mode</strong><small>Remember this preference. Use Approve all or Enable PTT to activate the microphone.</small></span></label>
+      <label class="dashboard-pref"><input id="dashAutoLocation" type="checkbox" /> <span><strong>Prefer location sharing for this mode</strong><small>Remember this preference. Use Approve all or Share my location to activate sharing.</small></span></label>
       <small id="dashPermissionState" class="dashboard-permission-state">Permissions checked on this device.</small>
     </section>
 
