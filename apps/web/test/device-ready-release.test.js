@@ -7,7 +7,7 @@ const readApi = (name) => fs.readFile(new URL(`../../api/lib/${name}`, import.me
 
 test('release bootstrap provides deterministic clean reload and stale-release detection', async () => {
   const boot = await readWeb('release-bootstrap.js');
-  assert.match(boot, /RELEASE_ID = '2026-09-20\.1'/);
+  assert.match(boot, /RELEASE_ID = '2026-09-21\.1'/);
   assert.match(boot, /CLEAN_PARAM = '_ryde_clean'/);
   assert.match(boot, /registration\.unregister\(\)/);
   assert.match(boot, /key\.startsWith\('rydesync-shell-'\)/);
@@ -25,16 +25,16 @@ test('mobile Dashboard navigation is hard-bounded to the bottom bar', async () =
   assert.match(boot, /overflow-y:hidden!important/);
 });
 
-test('device readiness centralizes sign-in, microphone, location, audio, clean reload, and resync', async () => {
+test('device setup centralizes account, microphone, location, audio, refresh, and resync', async () => {
   const boot = await readWeb('release-bootstrap.js');
   for (const expected of [
-    'Device readiness',
+    'Device setup',
     'AeroVista account',
     'Microphone / PTT',
     'Location sharing',
     'Crew audio',
-    'Realtime / sync',
-    'Reload clean',
+    'Connection & music sync',
+    'Refresh app',
     'Resync'
   ]) assert.match(boot, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(boot, /navigator\.permissions\?\.query/);
@@ -43,6 +43,33 @@ test('device readiness centralizes sign-in, microphone, location, audio, clean r
   assert.match(boot, /controlButton\('audioListenToggle'\)/);
   assert.match(boot, /controlButton\('rtRefresh'\)/);
   assert.match(boot, /Opening secure sign-in/);
+  assert.doesNotMatch(boot, /rydeReadyEnableAll/);
+});
+
+test('device setup is discoverable once and gives denied permissions a recovery path', async () => {
+  const boot = await readWeb('release-bootstrap.js');
+  assert.match(boot, /READY_SEEN_KEY = 'rydesync:device-ready-seen'/);
+  assert.match(boot, /if \(!hasSeenDeviceReady\(\)\) setTimeout\(openPanel, 450\)/);
+  assert.match(boot, /Fix permission/);
+  assert.match(boot, /Blocked by browser\/site settings/);
+  assert.match(boot, /Device ready' : 'Device setup'/);
+});
+
+test('resync refreshes canonical room state without changing crew audio', async () => {
+  const boot = await readWeb('release-bootstrap.js');
+  const handler = boot.match(/document\.getElementById\('rydeReadyResync'\)[\s\S]*?document\.getElementById\('rydeReadyCleanReload'\)/)?.[0] || '';
+  assert.match(handler, /controlButton\('rtRefresh'\)/);
+  assert.doesNotMatch(handler, /audioListenToggle/);
+  assert.match(handler, /without changing your audio setting/);
+});
+
+test('login errors are surfaced in device setup and removed from the URL after handling', async () => {
+  const boot = await readWeb('release-bootstrap.js');
+  assert.match(boot, /url\.searchParams\.delete\('login_error'\)/);
+  assert.match(boot, /This sign-in attempt is stale/);
+  assert.match(boot, /panel\.hidden = false/);
+  assert.match(boot, /markDeviceReadySeen\(\)/);
+  assert.match(boot, /history\.replaceState\(history\.state, '', url\)/);
 });
 
 test('shared playback defaults favor tighter synchronization without removing environment overrides', async () => {
@@ -53,8 +80,8 @@ test('shared playback defaults favor tighter synchronization without removing en
   assert.match(config, /intEnv\('PLAYBACK_SYNC_INTERVAL_MS'/);
 });
 
-test('service worker cache advances with the unified readiness release', async () => {
+test('service worker cache advances with the device-setup UX release', async () => {
   const sw = await readWeb('sw.js');
-  assert.match(sw, /rydesync-shell-2026-09-20-1/);
+  assert.match(sw, /rydesync-shell-2026-09-21-1/);
   assert.doesNotMatch(sw, /release-bootstrap\.js[',]/);
 });
