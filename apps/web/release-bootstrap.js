@@ -1,8 +1,9 @@
-const RELEASE_ID = '2026-09-20.1';
+const RELEASE_ID = '2026-09-21.1';
 const RELEASE_KEY = 'rydesync:release-id';
 const RELEASE_PARAM = '_ryde_release';
 const CLEAN_PARAM = '_ryde_clean';
 const READY_STYLE_ID = 'rydesync-device-ready-styles';
+const READY_SEEN_KEY = 'rydesync:device-ready-seen';
 
 function readStoredRelease() {
   try { return localStorage.getItem(RELEASE_KEY) || ''; }
@@ -99,6 +100,22 @@ async function browserPermission(name) {
   }
 }
 
+function hasSeenDeviceReady() {
+  try { return localStorage.getItem(READY_SEEN_KEY) === '1'; }
+  catch {
+    try { return sessionStorage.getItem(READY_SEEN_KEY) === '1'; }
+    catch { return true; }
+  }
+}
+
+function markDeviceReadySeen() {
+  try { localStorage.setItem(READY_SEEN_KEY, '1'); }
+  catch {
+    try { sessionStorage.setItem(READY_SEEN_KEY, '1'); }
+    catch { /* no persistent storage; avoid breaking setup */ }
+  }
+}
+
 function installReadyStyles() {
   if (document.getElementById(READY_STYLE_ID)) return;
   const style = document.createElement('style');
@@ -129,7 +146,7 @@ function installDeviceReadyPanel() {
   const launcher = document.createElement('button');
   launcher.id = 'rydeDeviceReadyButton';
   launcher.type = 'button';
-  launcher.innerHTML = '<span>Device ready</span><span id="rydeReadyCount" class="ready-count">0/3</span>';
+  launcher.innerHTML = '<span id="rydeReadyLabel">Device setup</span><span id="rydeReadyCount" class="ready-count">0/3</span>';
 
   const panel = document.createElement('section');
   panel.id = 'rydeDeviceReadyPanel';
@@ -137,22 +154,21 @@ function installDeviceReadyPanel() {
   panel.setAttribute('aria-label', 'Device readiness');
   panel.innerHTML = `
     <div class="ryde-ready-head">
-      <div><div class="ryde-ready-release">RydeSync ${RELEASE_ID}</div><h3>Device readiness</h3><p>Sign-in, microphone, location, crew audio, sync recovery, and clean reload live here.</p></div>
-      <button id="rydeReadyClose" class="ryde-ready-close" type="button" aria-label="Close device readiness">×</button>
+      <div><div class="ryde-ready-release">RydeSync ${RELEASE_ID}</div><h3>Device setup</h3><p>Your account, permissions, crew audio, sync, and app recovery all stay here.</p></div>
+      <button id="rydeReadyClose" class="ryde-ready-close" type="button" aria-label="Close device setup">×</button>
     </div>
     <div class="ryde-ready-list">
       <div class="ryde-ready-row"><div><strong>AeroVista account</strong><small id="rydeReadyIdentityDetail">Guest access is available.</small></div><div><span id="rydeReadyIdentity" class="ryde-ready-state">Guest</span><button id="rydeReadySignIn" type="button">Sign in</button></div></div>
-      <div class="ryde-ready-row"><div><strong>Microphone / PTT</strong><small id="rydeReadyMicDetail">Permission is requested only from this explicit action.</small></div><div><span id="rydeReadyMic" class="ryde-ready-state">Check</span><button id="rydeReadyMicAction" type="button">Enable</button></div></div>
+      <div class="ryde-ready-row"><div><strong>Microphone / PTT</strong><small id="rydeReadyMicDetail">Permission is requested only when you choose Enable.</small></div><div><span id="rydeReadyMic" class="ryde-ready-state">Check</span><button id="rydeReadyMicAction" type="button">Enable</button></div></div>
       <div class="ryde-ready-row"><div><strong>Location sharing</strong><small id="rydeReadyGeoDetail">Location stays off until you explicitly enable it.</small></div><div><span id="rydeReadyGeo" class="ryde-ready-state">Check</span><button id="rydeReadyGeoAction" type="button">Enable</button></div></div>
-      <div class="ryde-ready-row"><div><strong>Crew audio</strong><small id="rydeReadyAudioDetail">Shared music still requires a user gesture.</small></div><div><span id="rydeReadyAudio" class="ryde-ready-state">Off</span><button id="rydeReadyAudioAction" type="button">Listen</button></div></div>
-      <div class="ryde-ready-row"><div><strong>Realtime / sync</strong><small id="rydeReadySyncDetail">Request a fresh room snapshot if playback or presence looks late.</small></div><div><span id="rydeReadySync" class="ryde-ready-state">Idle</span><button id="rydeReadyResync" type="button">Resync</button></div></div>
+      <div class="ryde-ready-row"><div><strong>Crew audio</strong><small id="rydeReadyAudioDetail">Shared music starts only when you choose Listen.</small></div><div><span id="rydeReadyAudio" class="ryde-ready-state">Off</span><button id="rydeReadyAudioAction" type="button">Listen</button></div></div>
+      <div class="ryde-ready-row"><div><strong>Connection & music sync</strong><small id="rydeReadySyncDetail">Resync requests the newest room state without changing your audio choice.</small></div><div><span id="rydeReadySync" class="ryde-ready-state">Idle</span><button id="rydeReadyResync" type="button">Resync</button></div></div>
     </div>
     <div class="ryde-ready-actions">
-      <button id="rydeReadyEnableAll" class="primary" type="button">Enable PTT + location + crew audio</button>
-      <button id="rydeReadyCleanReload" class="secondary" type="button">Reload clean</button>
+      <button id="rydeReadyCleanReload" class="secondary" type="button">Refresh app</button>
       <button id="rydeReadyOpenDashboard" class="secondary" type="button">Open dashboard</button>
     </div>
-    <p id="rydeReadyMessage" class="ryde-ready-message"></p>`;
+    <p id="rydeReadyMessage" class="ryde-ready-message">Permissions and recovery stay here so you do not have to hunt through the app.</p>`;
 
   document.body.append(launcher, panel);
 
@@ -163,45 +179,45 @@ function installDeviceReadyPanel() {
 
   const openPanel = () => {
     panel.hidden = false;
+    markDeviceReadySeen();
     refreshReadyState();
   };
   launcher.addEventListener('click', () => panel.hidden ? openPanel() : (panel.hidden = true));
   document.getElementById('rydeReadyClose')?.addEventListener('click', () => { panel.hidden = true; });
 
-  document.getElementById('rydeReadyMicAction')?.addEventListener('click', () => {
+  document.getElementById('rydeReadyMicAction')?.addEventListener('click', async () => {
+    const permission = await browserPermission('microphone');
+    if (permission === 'denied') {
+      setMessage('Microphone is blocked by this browser/site. Open RydeSync site permissions, allow Microphone, then return here. Status will refresh automatically.');
+      return;
+    }
     const button = controlButton('voiceEnable');
-    if (button && !button.disabled && !controlActive('voiceEnable', /disable|stop/i)) button.click();
-    setMessage('Microphone/PTT request sent from Device readiness.');
+    if (button && !button.disabled) button.click();
+    setMessage('Microphone/PTT setting updated from Device setup.');
     setTimeout(refreshReadyState, 700);
   });
-  document.getElementById('rydeReadyGeoAction')?.addEventListener('click', () => {
+  document.getElementById('rydeReadyGeoAction')?.addEventListener('click', async () => {
+    const permission = await browserPermission('geolocation');
+    if (permission === 'denied') {
+      setMessage('Location is blocked by this browser/site. Open RydeSync site permissions, allow Location, then return here. Status will refresh automatically.');
+      return;
+    }
     const button = controlButton('locationToggle');
-    if (button && !button.disabled && !controlActive('locationToggle', /stop/i)) button.click();
-    setMessage('Location request sent from Device readiness.');
+    if (button && !button.disabled) button.click();
+    setMessage('Location sharing setting updated from Device setup.');
     setTimeout(refreshReadyState, 700);
   });
   document.getElementById('rydeReadyAudioAction')?.addEventListener('click', () => {
     const button = controlButton('audioListenToggle');
-    if (button && !button.disabled && !controlActive('audioListenToggle', /stop/i)) button.click();
-    setMessage('Crew audio request sent from Device readiness.');
+    if (button && !button.disabled) button.click();
+    setMessage('Crew audio setting updated from Device setup.');
     setTimeout(refreshReadyState, 700);
   });
-  document.getElementById('rydeReadyEnableAll')?.addEventListener('click', () => {
-    const voice = controlButton('voiceEnable');
-    const locationButton = controlButton('locationToggle');
-    const audio = controlButton('audioListenToggle');
-    if (voice && !voice.disabled && !controlActive('voiceEnable', /disable|stop/i)) voice.click();
-    if (locationButton && !locationButton.disabled && !controlActive('locationToggle', /stop/i)) locationButton.click();
-    if (audio && !audio.disabled && !controlActive('audioListenToggle', /stop/i)) audio.click();
-    setMessage('Requested device readiness from one user action. Browser/OS prompts remain authoritative.');
-    setTimeout(refreshReadyState, 900);
-  });
   document.getElementById('rydeReadyResync')?.addEventListener('click', () => {
-    const audio = controlButton('audioListenToggle');
-    if (audio && !audio.disabled && !controlActive('audioListenToggle', /stop/i)) audio.click();
     const refresh = controlButton('rtRefresh');
-    if (refresh && !refresh.disabled) refresh.click();
-    setMessage(refresh ? 'Fresh room state requested. Playback will correct against the latest server anchor.' : 'Join a Ryde first, then use Resync.');
+    const canRefresh = Boolean(refresh && !refresh.disabled);
+    if (canRefresh) refresh.click();
+    setMessage(canRefresh ? 'Fresh room state requested. Playback will correct against the latest server anchor without changing your audio setting.' : 'Join a Ryde first, then use Resync.');
     setTimeout(refreshReadyState, 700);
   });
   document.getElementById('rydeReadyCleanReload')?.addEventListener('click', () => cleanReload('device-ready'));
@@ -223,6 +239,7 @@ function installDeviceReadyPanel() {
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshReadyState(); });
   refreshReadyState();
+  if (!hasSeenDeviceReady()) setTimeout(openPanel, 450);
 }
 
 async function refreshReadyState() {
@@ -235,6 +252,8 @@ async function refreshReadyState() {
   const ready = [voiceActive, locationActive, audioActive].filter(Boolean).length;
   const count = document.getElementById('rydeReadyCount');
   if (count) count.textContent = `${ready}/3`;
+  const readyLabel = document.getElementById('rydeReadyLabel');
+  if (readyLabel) readyLabel.textContent = ready === 3 ? 'Device ready' : 'Device setup';
   launcher.classList.toggle('ready', ready === 3);
 
   const micPermission = await browserPermission('microphone');
@@ -257,17 +276,33 @@ async function refreshReadyState() {
 
   const identityDetail = document.getElementById('rydeReadyIdentityDetail');
   if (identityDetail) identityDetail.textContent = signedIn ? identityText : 'Guest access remains available; sign in for member capabilities.';
+  const signInAction = document.getElementById('rydeReadySignIn');
+  if (signInAction instanceof HTMLButtonElement) signInAction.textContent = signedIn ? 'Account' : 'Sign in';
   const micDetail = document.getElementById('rydeReadyMicDetail');
-  if (micDetail) micDetail.textContent = voiceActive ? 'PTT is enabled on this device.' : `Browser permission: ${micPermission}.`;
+  if (micDetail) micDetail.textContent = voiceActive
+    ? 'PTT is enabled on this device.'
+    : micPermission === 'denied'
+      ? 'Blocked by browser/site settings. Allow Microphone for RydeSync, then return here.'
+      : `Browser permission: ${micPermission}.`;
+  const micAction = document.getElementById('rydeReadyMicAction');
+  if (micAction instanceof HTMLButtonElement) micAction.textContent = voiceActive ? 'Turn off' : micPermission === 'denied' ? 'Fix permission' : 'Enable';
   const geoDetail = document.getElementById('rydeReadyGeoDetail');
-  if (geoDetail) geoDetail.textContent = locationActive ? (document.getElementById('locationStatus')?.textContent || 'Sharing location.') : `Browser permission: ${geoPermission}.`;
+  if (geoDetail) geoDetail.textContent = locationActive
+    ? (document.getElementById('locationStatus')?.textContent || 'Sharing location.')
+    : geoPermission === 'denied'
+      ? 'Blocked by browser/site settings. Allow Location for RydeSync, then return here.'
+      : `Browser permission: ${geoPermission}.`;
+  const geoAction = document.getElementById('rydeReadyGeoAction');
+  if (geoAction instanceof HTMLButtonElement) geoAction.textContent = locationActive ? 'Turn off' : geoPermission === 'denied' ? 'Fix permission' : 'Enable';
   const audioDetail = document.getElementById('rydeReadyAudioDetail');
   if (audioDetail) audioDetail.textContent = document.getElementById('audioClientStatus')?.textContent || 'Crew audio is off.';
+  const audioAction = document.getElementById('rydeReadyAudioAction');
+  if (audioAction instanceof HTMLButtonElement) audioAction.textContent = audioActive ? 'Stop' : 'Listen';
   const syncDetail = document.getElementById('rydeReadySyncDetail');
   if (syncDetail) syncDetail.textContent = `${realtimeText} · ${document.getElementById('sharedPlaybackState')?.textContent?.trim() || 'music idle'} · Resync requests a fresh room snapshot.`;
 
   const dashApproveStrong = document.querySelector('#dashApproveAll strong');
-  if (dashApproveStrong) dashApproveStrong.textContent = 'Device ready';
+  if (dashApproveStrong) dashApproveStrong.textContent = ready === 3 ? 'Device ready' : 'Device setup';
 }
 
 function installLoginSingleFlight() {
@@ -297,15 +332,29 @@ function reconcileLoginMarkers() {
   const signedIn = url.searchParams.get('signed_in') === '1';
   const loginError = url.searchParams.get('login_error');
   const message = document.getElementById('rydeReadyMessage');
+  const panel = document.getElementById('rydeDeviceReadyPanel');
+  let cleanUrl = false;
+
   if (signedIn) {
     url.searchParams.delete('signed_in');
-    history.replaceState(history.state, '', url);
+    cleanUrl = true;
     if (message) message.textContent = 'AeroVista sign-in completed.';
-  } else if (loginError && message) {
-    message.textContent = loginError === 'invalid_auth_state'
-      ? 'That sign-in handoff expired or belonged to an older browser state. Use Reload clean, then sign in once.'
-      : `Sign-in needs another try (${loginError}).`;
   }
+  if (loginError) {
+    url.searchParams.delete('login_error');
+    cleanUrl = true;
+    if (message) {
+      message.textContent = loginError === 'invalid_auth_state'
+        ? 'This sign-in attempt is stale. Close older RydeSync sign-in tabs, use Refresh app here, then sign in again.'
+        : `Sign-in needs another try (${loginError}). Use Refresh app here if it repeats.`;
+    }
+    if (panel instanceof HTMLElement) {
+      panel.hidden = false;
+      markDeviceReadySeen();
+      refreshReadyState();
+    }
+  }
+  if (cleanUrl) history.replaceState(history.state, '', url);
 }
 
 async function checkForNewRelease() {
