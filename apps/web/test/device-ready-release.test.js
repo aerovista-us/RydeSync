@@ -7,13 +7,18 @@ const readApi = (name) => fs.readFile(new URL(`../../api/lib/${name}`, import.me
 
 test('release bootstrap provides deterministic clean reload and stale-release detection', async () => {
   const boot = await readWeb('release-bootstrap.js');
-  assert.match(boot, /RELEASE_ID = '2026-09-21\.1'/);
+  assert.match(boot, /RELEASE_ID = '2026-09-22\.1'/);
   assert.match(boot, /CLEAN_PARAM = '_ryde_clean'/);
   assert.match(boot, /registration\.unregister\(\)/);
   assert.match(boot, /key\.startsWith\('rydesync-shell-'\)/);
   assert.match(boot, /cleanReload\('new-release-detected'\)/);
   assert.match(boot, /fetch\(`\/release-bootstrap\.js\?probe=/);
   assert.match(boot, /cache: 'no-store'/);
+});
+
+test('idle realtime shell does not claim a room connection before one exists', async () => {
+  const html = await readWeb('index.html');
+  assert.match(html, /id="rtStatus" class="rt-status">NO ACTIVE RYDE<\/span>/);
 });
 
 test('mobile Dashboard navigation is hard-bounded to the bottom bar', async () => {
@@ -82,6 +87,6 @@ test('shared playback defaults favor tighter synchronization without removing en
 
 test('service worker cache advances with the device-setup UX release', async () => {
   const sw = await readWeb('sw.js');
-  assert.match(sw, /rydesync-shell-2026-09-21-1/);
+  assert.match(sw, /rydesync-shell-2026-09-22-1/);
   assert.doesNotMatch(sw, /release-bootstrap\.js[',]/);
 });
