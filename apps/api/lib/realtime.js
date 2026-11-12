@@ -58,8 +58,9 @@ export class RealtimeHub {
   }
 
   playbackForRoom(roomId) {
-    const state = this.roomStates.get(roomId);
-    return state ? publicPlayback(state.playback) : null;
+    const room = this.rooms.resolve(roomId);
+    const playback = room.playback || this.roomStates.get(roomId)?.playback;
+    return playback ? publicPlayback(playback) : null;
   }
 
   #state(roomId) {
@@ -71,7 +72,7 @@ export class RealtimeHub {
         seenMembers: new Set(),
         locations: new Map(),
         lastLocationAt: new Map(),
-        playback: createPlaybackState(this.now()),
+        playback: this.rooms.resolve(roomId).playback || createPlaybackState(this.now()),
         lastPlaybackSyncAt: 0,
         voicePeers: new Set(),
         voiceFloorMemberId: null
@@ -141,8 +142,8 @@ export class RealtimeHub {
 
     let room;
     try { room = this.rooms.resolve(roomRef); }
-    catch {
-      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    catch (error) {
+      socket.write(error.status === 503 ? 'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n' : 'HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
       socket.end();
       return;
     }
@@ -161,14 +162,22 @@ export class RealtimeHub {
     authTimer.unref?.();
 
     ws.on('pong', () => { pending.alive = true; });
-    ws.on('message', (text) => this.#message(pending, room, text, authTimer));
+    ws.on('message', (text) => {
+      this.#message(pending, room, text, authTimer).catch(() => ws.close(1013, 'Room storage unavailable; reconnect after recovery'));
+    });
     ws.on('close', () => {
       clearTimeout(authTimer);
       this.#disconnect(pending);
     });
   }
 
-  #message(connection, room, text, authTimer) {
+  async #message(connection, room, text, authTimer) {
+    this.rooms.assertReady?.();
+    try { this.rooms.resolve(room.id); }
+    catch (error) {
+      connection.ws.close(error.status === 503 ? 1013 : CLOSE.ROOM_EXPIRED, 'Room unavailable');
+      return;
+    }
     const message = parseMessage(text);
     if (!message || typeof message.type !== 'string') {
       connection.ws.close(CLOSE.BAD_REQUEST, 'Invalid realtime message');
@@ -242,12 +251,12 @@ export class RealtimeHub {
     }
 
     if (message.type === 'room.lock.set') {
-      this.#roomLock(connection, room, message);
+      await this.#roomLock(connection, room, message);
       return;
     }
 
     if (message.type === 'room.end') {
-      this.#roomEnd(connection, room);
+      await this.#roomEnd(connection, room);
       return;
     }
 
@@ -263,7 +272,7 @@ export class RealtimeHub {
     }
 
     if (message.type.startsWith('playback.')) {
-      this.#playbackCommand(connection, room, message);
+      await this.#playbackCommand(connection, room, message);
       return;
     }
 
@@ -383,9 +392,9 @@ export class RealtimeHub {
     this.#broadcast(room.id, this.#event(room.id, 'voice.floor', { memberId: null, reason: 'released' }));
   }
 
-  #roomLock(connection, room, message) {
+  async #roomLock(connection, room, message) {
     try {
-      const locked = this.rooms.setLocked(room.id, connection.memberId, Boolean(message.locked));
+      const locked = await this.rooms.setLocked(room.id, connection.memberId, Boolean(message.locked));
       this.#broadcast(room.id, this.#event(room.id, 'room.locked', { locked }));
     } catch (error) {
       this.#send(connection, {
@@ -395,7 +404,7 @@ export class RealtimeHub {
     }
   }
 
-  #roomEnd(connection, room) {
+  async #roomEnd(connection, room) {
     if (room.hostMemberId !== connection.memberId) {
       this.#send(connection, {
         type: 'room.error', seq: this.#state(room.id).seq, serverTs: new Date(this.now()).toISOString(),
@@ -404,14 +413,14 @@ export class RealtimeHub {
       return;
     }
     const state = this.#state(room.id);
+    await this.rooms.end(room.id, connection.memberId);
     const event = this.#event(room.id, 'room.ended', { roomId: room.id });
     this.#broadcast(room.id, event);
-    this.rooms.end(room.id, connection.memberId);
     for (const peer of state.connections.values()) peer.ws.close(CLOSE.ROOM_ENDED, 'Ryde ended by host');
     this.roomStates.delete(room.id);
   }
 
-  #playbackCommand(connection, room, message) {
+  async #playbackCommand(connection, room, message) {
     const member = room.members.get(connection.memberId);
     if (!canControlPlayback(member)) {
       this.#send(connection, {
@@ -425,7 +434,7 @@ export class RealtimeHub {
 
     const state = this.#state(room.id);
     try {
-      state.playback = applyPlaybackCommand(state.playback, message, connection.memberId, this.now());
+      state.playback = await this.rooms.updatePlayback(room.id, previous => applyPlaybackCommand(previous, message, connection.memberId, this.now()));
     } catch (error) {
       const code = error instanceof PlaybackError ? error.code : 'playback_error';
       this.#send(connection, {
@@ -576,6 +585,7 @@ export class RealtimeHub {
   }
 
   #playbackSync() {
+    try { this.rooms.assertReady?.(); } catch { this.shutdown(); return; }
     const now = this.now();
     for (const [roomId, state] of this.roomStates) {
       if (!state.playback.trackId || state.playback.status !== 'playing' || state.connections.size === 0) continue;
@@ -589,7 +599,19 @@ export class RealtimeHub {
     }
   }
 
+  shutdown() {
+    clearInterval(this.heartbeat);
+    clearInterval(this.playbackTimer);
+    for (const state of this.roomStates.values()) {
+      for (const connection of state.connections.values()) connection.ws.close(1013, 'Server reconnect required');
+      state.locations.clear();
+      state.voicePeers.clear();
+      state.voiceFloorMemberId = null;
+    }
+  }
+
   #heartbeat() {
+    try { this.rooms.assertReady?.(); } catch { this.shutdown(); return; }
     this.rooms.prune();
     const now = this.now();
     for (const [roomId, state] of this.roomStates) {

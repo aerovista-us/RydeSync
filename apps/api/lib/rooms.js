@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { HttpError, cleanText } from './http.js';
 import { issueRoomToken } from './room-token.js';
+import { createPlaybackState } from './playback.js';
 
 const ROOM_MODES = new Set(['group_ride', 'listening_party', 'classroom', 'band_practice', 'campaign']);
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -135,6 +136,12 @@ export class RoomStore {
     this.rooms.delete(room.id);
     this.codes.delete(room.joinCode);
     return room;
+  }
+
+  updatePlayback(roomId, update) {
+    const room = this.resolve(roomId);
+    room.playback = update(room.playback || createPlaybackState(this.now()));
+    return room.playback;
   }
 
   publicRoom(room) {

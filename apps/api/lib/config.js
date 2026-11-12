@@ -37,6 +37,16 @@ export function loadConfig() {
   }
 
   const port = intEnv('PORT', 9000, { min: 1, max: 65535 });
+  const storageDriver = process.env.ROOM_STORAGE_DRIVER || 'memory';
+  if (!['memory', 'redis'].includes(storageDriver)) throw new Error('ROOM_STORAGE_DRIVER must be memory or redis');
+  const redisUrl = process.env.REDIS_URL || '';
+  const redisPrefix = process.env.REDIS_KEY_PREFIX || 'rydesync:v1:';
+  if (!/^[a-zA-Z0-9:_-]{1,64}:$/.test(redisPrefix)) throw new Error('Invalid REDIS_KEY_PREFIX');
+  if (storageDriver === 'redis') {
+    let parsed;
+    try { parsed = new URL(redisUrl); } catch { throw new Error('Redis storage requires a valid REDIS_URL'); }
+    if (!['redis:', 'rediss:'].includes(parsed.protocol) || !parsed.hostname) throw new Error('Invalid Redis URL scheme');
+  }
 
   return Object.freeze({
     nodeEnv,
@@ -44,6 +54,11 @@ export function loadConfig() {
     publicBaseUrl: process.env.PUBLIC_BASE_URL || `http://localhost:${port}`,
     roomTokenSecret,
     generatedDevSecret,
+    storage: Object.freeze({
+      driver: storageDriver, url: redisUrl, prefix: redisPrefix,
+      timeoutMs: intEnv('REDIS_TIMEOUT_MS', 2500, { min: 250, max: 3000 }),
+      leaseMs: intEnv('REDIS_WRITER_LEASE_MS', 15000, { min: 12000, max: 60000 })
+    }),
     roomTtlSeconds: intEnv('ROOM_TTL_SECONDS', 21_600, { min: 300, max: 604_800 }),
     memberTokenTtlSeconds: intEnv('MEMBER_TOKEN_TTL_SECONDS', 28_800, { min: 60, max: 604_800 }),
     identity: Object.freeze({
