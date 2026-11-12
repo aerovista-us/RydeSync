@@ -142,6 +142,7 @@ Node 22+:
 
 ```bash
 cp .env.example .env
+npm ci
 npm test
 npm start
 ```
@@ -165,3 +166,7 @@ Operational deployment ownership is `aerovista-us/nxcore` **master**. NXCore `ma
 - `docs/VOICE_DEPLOYMENT.md` — TURN/PTT deployment gate.
 - `docs/ALPHA7_DEPLOYMENT.md` — controlled NXCore release process.
 - `docs/SYNTHETIC_IDENTITY_ACCEPTANCE_MATRIX.md` — cross-layer synthetic test semantics.
+
+## NXCore Redis durability candidate
+
+The approved dedicated NXCore Redis decision and $0/month new-external-spend policy are recorded in `deploy/redis/decision.json`. This branch adds opt-in single-writer durability for rooms/membership/locks/playback. The existing deployed app remains memory-backed until the rollout gates pass. See [Redis operations](docs/REDIS_OPERATIONS.md) for configuration, isolated tests, backup/restore evidence and the current host/deployment prerequisites.

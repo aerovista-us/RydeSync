@@ -6,6 +6,7 @@ import { loadConfig } from './lib/config.js';
 import { HttpError, json, readJson } from './lib/http.js';
 import { resolveIdentity, requireCapability, requireIdentity } from './lib/identity.js';
 import { RoomStore } from './lib/rooms.js';
+import { createConfiguredRoomStore } from './lib/redis-room-repository.js';
 import { RealtimeHub } from './lib/realtime.js';
 import { echoverseAudioPath, echoverseFilePath, fetchCatalog, proxyEchoVerseBinary } from './lib/echoverse.js';
 import { clearMediaSessionCookie, issueMediaSession, issueRoomMediaSession, mediaSessionCookie, mediaSessionFromRequest } from './lib/media-session.js';
@@ -39,8 +40,9 @@ async function serveWebFile(res, fileName) {
   return res.end(content);
 }
 
-export function createApp(config = loadConfig()) {
-  const rooms = new RoomStore(config);
+export function createApp(config = loadConfig(), { rooms = null } = {}) {
+  if (!rooms && config.storage?.driver === 'redis') throw new Error('Redis app requires an initialized durable room store');
+  rooms ||= new RoomStore(config);
   let realtimeHub = null;
 
   function resolveRoomMemberFromToken(roomToken, message = 'A valid Ryde room session is required') {
@@ -60,7 +62,9 @@ export function createApp(config = loadConfig()) {
     const pathname = url.pathname;
 
     if (req.method === 'GET' && pathname === '/health') {
-      return json(res, 200, { ok: true, service: 'rydesync', version: '3.0.0-alpha.7' });
+      try { rooms.assertReady?.(); }
+      catch { return json(res, 503, { ok: false, service: 'rydesync', storage: 'unavailable' }); }
+      return json(res, 200, { ok: true, service: 'rydesync', version: '3.0.0-alpha.7', roomStorage: config.storage?.driver || 'memory' });
     }
 
     if (req.method === 'GET' && pathname === '/v1/bootstrap') {
@@ -239,7 +243,7 @@ export function createApp(config = loadConfig()) {
       const principal = await resolveIdentity(req, config);
       requireIdentity(principal);
       const body = await readJson(req);
-      const created = rooms.create(body, principal);
+      const created = await rooms.create(body, principal);
       return json(res, 201, created);
     }
 
@@ -252,7 +256,7 @@ export function createApp(config = loadConfig()) {
     if (req.method === 'POST' && joinMatch) {
       const principal = await resolveIdentity(req, config);
       const body = await readJson(req);
-      const joined = rooms.join(decodeURIComponent(joinMatch[1]), body, principal);
+      const joined = await rooms.join(decodeURIComponent(joinMatch[1]), body, principal);
       return json(res, 200, joined);
     }
 
@@ -314,12 +318,24 @@ export function createApp(config = loadConfig()) {
     }
   });
   realtimeHub = new RealtimeHub({ server, rooms, config });
+  server.shutdown = async () => {
+    realtimeHub.shutdown();
+    await new Promise(resolve => server.close(resolve));
+    await rooms.close?.();
+  };
   return server;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const config = loadConfig();
-  const server = createApp(config);
+  const rooms = await createConfiguredRoomStore(config);
+  const server = createApp(config, { rooms });
+  let stopping = false;
+  for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, async () => {
+    if (stopping) return;
+    stopping = true;
+    await server.shutdown();
+  });
   server.listen(config.port, () => {
     if (config.generatedDevSecret) {
       console.warn('[rydesync] ROOM_TOKEN_SECRET was not set; using an ephemeral development secret.');

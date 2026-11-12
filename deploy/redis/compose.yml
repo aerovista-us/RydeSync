@@ -1,0 +1,35 @@
+services:
+  redis:
+    image: redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    container_name: ${RYDESYNC_REDIS_CONTAINER:-rydesync-redis}
+    restart: unless-stopped
+    command: [redis-server, /usr/local/etc/redis/redis.conf]
+    mem_limit: 512m
+    cpus: 0.50
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    user: '999:1000'
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    volumes:
+      - data:/data
+      - ${RYDESYNC_REDIS_CONFIG_DIR:-/home/glyph/.config/aerovista/rydesync-redis}/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ${RYDESYNC_REDIS_CONFIG_DIR:-/home/glyph/.config/aerovista/rydesync-redis}/users.acl:/usr/local/etc/redis/users.acl:ro
+      - ${RYDESYNC_REDIS_CONFIG_DIR:-/home/glyph/.config/aerovista/rydesync-redis}/observer-password:/run/secrets/observer-password:ro
+      - ${RYDESYNC_REDIS_CONFIG_DIR:-/home/glyph/.config/aerovista/rydesync-redis}/operator-password:/run/secrets/operator-password:ro
+    networks: [storage]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/observer-password)" redis-cli --user observer ping | grep -qx PONG']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+networks:
+  storage:
+    name: ${RYDESYNC_REDIS_NETWORK:-rydesync-storage}
+    internal: true
+volumes:
+  data:
+    name: ${RYDESYNC_REDIS_VOLUME:-rydesync_redis_data}

@@ -1,0 +1,14 @@
+{
+  "decision_id": "rydesync-redis-production-2026-11-12",
+  "approved_by": "Timbr",
+  "approved_on": "2026-11-12",
+  "provider": "self-hosted NXCore",
+  "isolation": "dedicated Redis instance; internal Docker network; no host port",
+  "new_external_spend_usd_per_month": 0,
+  "managed_provider_requires_separate_approval": true,
+  "future_managed_budget_proposal_usd": { "warning": 10, "critical": 15, "ceiling": 20 },
+  "persistence": "AOF everysec plus RDB snapshots and tested independent backup",
+  "ephemeral": ["location", "presence", "voice", "credentials"],
+  "memory_thresholds_percent": { "warning": 70, "critical": 85, "urgent": 95 },
+  "readiness_policy": "provider and budget decisions resolved; integration and production acceptance require evidence"
+}

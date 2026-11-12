@@ -10,6 +10,10 @@
   "scripts": {
     "start": "node apps/api/server.js",
     "dev": "NODE_ENV=development node --watch apps/api/server.js",
-    "test": "node --test apps/api/test/*.test.js apps/web/test/*.test.js"
+    "test": "node --test apps/api/test/*.test.js apps/web/test/*.test.js",
+    "test:redis": "node --test apps/api/test/redis-integration.test.js"
+  },
+  "dependencies": {
+    "redis": "6.3.1"
   }
 }

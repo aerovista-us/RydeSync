@@ -217,3 +217,8 @@ eb8471114da51fe6c20957c9b484c043c355768d
 Deployment orchestration is owned by `aerovista-us/nxcore` operational `master`, not NXCore `main`. Repository synchronization and production deployment remain distinct operations.
 
 Named restore refs are recorded in `PRODUCTION_ACCEPTANCE_2026-09-01.md`.
+
+
+## Approved NXCore Redis durability candidate (2026-11-12)
+
+The deployed/default memory mode above remains current production behavior. This branch adds opt-in `ROOM_STORAGE_DRIVER=redis`: a lease-guarded single writer persists room metadata, token-bound membership/roles, locks and playback before acknowledgements. Location, voice, presence, tokens and account credentials stay outside persistence. Reconnect remains snapshot-based and event sequences are process-local; this does not add horizontal fan-out or HA. See `REDIS_OPERATIONS.md` and `REDIS_ACCEPTANCE_2026-11-12.md` for the approved $0 external-spend decision, tested recovery, resource limits and remaining host/deployment gates.
