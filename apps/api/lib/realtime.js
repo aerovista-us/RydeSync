@@ -58,8 +58,9 @@ export class RealtimeHub {
   }
 
   playbackForRoom(roomId) {
-    const state = this.roomStates.get(roomId);
-    return state ? publicPlayback(state.playback) : null;
+    const room = this.rooms.resolve(roomId);
+    const playback = room.playback || this.roomStates.get(roomId)?.playback;
+    return playback ? publicPlayback(playback) : null;
   }
 
   #state(roomId) {

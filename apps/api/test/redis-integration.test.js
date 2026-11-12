@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createApp } from '../server.js';
+import { applyPlaybackCommand } from '../lib/playback.js';
 import { createConfiguredRoomStore } from '../lib/redis-room-repository.js';
 
 const enabled = Boolean(process.env.REDIS_TEST_URL);
@@ -130,4 +131,55 @@ test('real Redis uses room-expiry TTL and ends remove the persisted key', { skip
     assert.equal(await store.repository.command(['GET', key]), null);
     assert.throws(() => store.resolve(created.room.id), { code: 'room_not_found' });
   } finally { await store.close(); }
+});
+
+test('restored playback grants current-track media before any WebSocket reconnect', { skip: !enabled }, async () => {
+  const cfg = config(prefix());
+  let app = await start(cfg);
+  try {
+    const created = await app.rooms.create({ name: 'Recovered media' }, host);
+    const joined = await app.rooms.join(created.room.id, { displayName: 'Guest' }, { identityId: null });
+    await app.rooms.updatePlayback(created.room.id, state => applyPlaybackCommand(state, { type: 'playback.select', trackId: 'recovered-track' }, created.member.id));
+    await app.server.shutdown();
+    app = await start(cfg);
+    const response = await fetch(`${app.base}/v1/echoverse/room-media-session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roomToken: joined.token }) });
+    assert.equal(response.status, 200);
+    const grant = await response.json();
+    assert.equal(grant.trackId, 'recovered-track');
+    assert.equal(grant.libraryGranted, false);
+    assert.equal(grant.scope, 'current-room-track');
+  } finally { await app.server.shutdown(); }
+});
+
+test('CLI exits on lost Redis writer authority so its supervisor can rehydrate', { skip: !enabled, timeout: 15000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { createServer } = await import('node:net');
+  const { createClient } = await import('redis');
+  const probe = createServer();
+  await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const port = probe.address().port;
+  await new Promise(resolve => probe.close(resolve));
+  const namespace = prefix();
+  const child = spawn(process.execPath, [new URL('../server.js', import.meta.url).pathname], { stdio: 'ignore', env: { ...process.env, NODE_ENV: 'production', PORT: String(port), PUBLIC_BASE_URL: `http://127.0.0.1:${port}`, ROOM_TOKEN_SECRET: 'synthetic-cli-only-key-20261112'.repeat(2), ROOM_STORAGE_DRIVER: 'redis', REDIS_URL: process.env.REDIS_TEST_URL, REDIS_KEY_PREFIX: namespace, REDIS_TIMEOUT_MS: '500', REDIS_WRITER_LEASE_MS: '12000' } });
+  const exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+  const client = createClient({ url: process.env.REDIS_TEST_URL, socket: { reconnectStrategy: false } });
+  client.on('error', () => {});
+  let timer;
+  try {
+    await client.connect();
+    let ready = false;
+    for (let i=0; i<50; i++) {
+      try { if ((await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(250) })).ok) { ready=true; break; } } catch {}
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(ready, true, 'CLI must first establish its own lease and become healthy');
+    await client.sendCommand(['SET', `${namespace}writer`, 'different-writer', 'PX', '1200']);
+    const result = await Promise.race([exited, new Promise((_, reject) => { timer=setTimeout(()=>reject(new Error('CLI stayed alive after losing storage authority')), 8000); })]);
+    assert.equal(result.code, 1);
+  } finally {
+    clearTimeout(timer);
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await exited;
+    if (client.isOpen) client.destroy();
+  }
 });

@@ -41,3 +41,8 @@ See `REDIS_OPERATIONS.md` for repeatable commands and rollback semantics.
 ## Follow-up: guarded rollout verified
 
 Companion [NXCore PR #27](https://github.com/aerovista-us/nxcore/pull/27) now implements the private-network/env-fragment deployment wiring on operational master. Its 28 new Redis rollout guard tests and 12 existing source/secret checks pass. An actual guarded deployment of this candidate to loopback staging passed; a full container restart recovered the synthetic room/playback and retained guest restrictions. A deliberately memory-only candidate was rejected, and the exact previous container/image/ports/networks and room state were recovered automatically. Production prerequisites now include review/promotion/installation of that tooling rather than an unwritten network implementation. Host memory configuration and production/capacity/field acceptance remain open. Production is still unchanged.
+
+
+## Release review fixes
+
+Review reproduced and fixed two restart behaviors: restored current-track grants now work before WebSocket reconnect, and the CLI exits with status 1 after losing Redis writer authority so Docker can restart and rehydrate it. Targeted regression tests failed before these fixes; the full real-Redis suite now passes **148/148, zero skipped**. Ordinary runs without Redis have six explicitly skipped integration tests. Room writes clone only the affected room rather than serializing all other active Rydes. GitHub CI now installs pinned dependencies and runs against an isolated Redis service so these tests cannot silently skip. Merging either repository does not automatically deploy production.

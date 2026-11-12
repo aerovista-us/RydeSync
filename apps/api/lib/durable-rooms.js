@@ -69,10 +69,13 @@ export class DurableRoomStore extends RoomStore {
       this.assertReady();
       this.prune();
       const draft = new RoomStore(this.config, this.now);
-      for (const room of this.rooms.values()) {
-        const copy = decodeRoom(encodeRoom(room));
-        draft.rooms.set(copy.id, copy);
-        draft.codes.set(copy.joinCode, copy.id);
+      // Copy the indexes, then clone only the room this operation mutates.
+      // A soundtrack command must not serialize every other active Ryde.
+      draft.rooms = new Map(this.rooms);
+      draft.codes = new Map(this.codes);
+      if (method !== 'create') {
+        const room = super.resolve(args[0]);
+        draft.rooms.set(room.id, decodeRoom(encodeRoom(room)));
       }
       const result = draft[method](...args);
       const id = method === 'create' || method === 'join' ? result.room.id : args[0];

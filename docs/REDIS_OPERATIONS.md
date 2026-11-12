@@ -48,7 +48,7 @@ docker run --rm --network rydesync-storage-pilot \
   sh -c 'export REDIS_TEST_URL="$REDIS_URL"; exec npm test'
 ```
 
-With no `REDIS_TEST_URL`, four integration tests are explicitly skipped; do not report them as passed. They use random `rydesync:test:*` namespaces and no production identities. `scripts/redis-recovery-fixture.js` additionally refuses a host other than `rydesync-redis-pilot` or `rydesync-redis-restore`; its fixture contains only synthetic credentials and is never committed.
+With no `REDIS_TEST_URL`, six integration tests are explicitly skipped; do not report them as passed. They use random `rydesync:test:*` namespaces and no production identities. `scripts/redis-recovery-fixture.js` additionally refuses a host other than `rydesync-redis-pilot` or `rydesync-redis-restore`; its fixture contains only synthetic credentials and is never committed.
 
 ## Backup and recovery
 
@@ -65,7 +65,7 @@ The 2026-11-12 rehearsal restored the snapshot with SHA-256 `76280156cbdf7d5857a
 
 ## App startup / cutover contract
 
-`ROOM_STORAGE_DRIVER=memory` preserves existing behavior. `redis` requires a valid `REDIS_URL`, a validated prefix, a successful exclusive writer lease, and successful schema validation/hydration before listening. Reads/joins/media grants fail closed when storage is unavailable. All durable mutations commit before HTTP/WS acknowledgement; an uncertain write result requires process restart/rehydration. Room TTL is enforced in Redis and process memory. Limits: 1,000 active rooms and 128 members per room. Live location/voice/presence and room/browser/media bearer tokens are excluded from the persisted projection. Sequence numbers remain process-local; reconnect uses authoritative snapshots.
+`ROOM_STORAGE_DRIVER=memory` preserves existing behavior. `redis` requires a valid `REDIS_URL`, a validated prefix, a successful exclusive writer lease, and successful schema validation/hydration before listening. Reads/joins/media grants fail closed when storage is unavailable. All durable mutations commit before HTTP/WS acknowledgement; an uncertain write result requires process restart/rehydration. The CLI watchdog exits with status 1 after storage authority is lost; Docker restart supervision retries startup, reacquires the lease and rehydrates before listening. A replacement may wait for the previous lease to expire. Room TTL is enforced in Redis and process memory. Limits: 1,000 active rooms and 128 members per room. Live location/voice/presence and room/browser/media bearer tokens are excluded from the persisted projection. Sequence numbers remain process-local; reconnect uses authoritative snapshots.
 
 Before production promotion:
 

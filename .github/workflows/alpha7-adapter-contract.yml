@@ -16,14 +16,30 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      redis:
+        image: redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test RydeSync
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts
+      - name: Test RydeSync with isolated Redis
+        env:
+          REDIS_TEST_URL: redis://127.0.0.1:6379/0
         run: timeout 60s npm test
       - name: Validate production compose
         env:
           RYDESYNC_ENV_FILE: .env.example
         run: docker compose config >/dev/null
+      - name: Validate private Redis compose
+        run: docker compose -f deploy/redis/compose.yml config --quiet

@@ -331,11 +331,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const rooms = await createConfiguredRoomStore(config);
   const server = createApp(config, { rooms });
   let stopping = false;
-  for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, async () => {
+  let storageWatchdog = null;
+  async function stop(exitCode = 0) {
     if (stopping) return;
     stopping = true;
-    await server.shutdown();
-  });
+    clearInterval(storageWatchdog);
+    const deadline = setTimeout(() => process.exit(exitCode || 1), 5000);
+    deadline.unref?.();
+    try { await server.shutdown(); process.exitCode = exitCode; }
+    catch { process.exitCode = 1; }
+    finally { clearTimeout(deadline); }
+  }
+  for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { void stop(); });
+  if (config.storage?.driver === 'redis') {
+    storageWatchdog = setInterval(() => {
+      if (stopping) return;
+      try { rooms.assertReady(); }
+      catch {
+        console.error('[rydesync] storage authority lost; exiting for supervised recovery');
+        void stop(1);
+      }
+    }, 1000);
+    storageWatchdog.unref?.();
+  }
   server.listen(config.port, () => {
     if (config.generatedDevSecret) {
       console.warn('[rydesync] ROOM_TOKEN_SECRET was not set; using an ephemeral development secret.');
