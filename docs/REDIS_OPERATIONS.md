@@ -70,7 +70,7 @@ The 2026-11-12 rehearsal restored the snapshot with SHA-256 `76280156cbdf7d5857a
 Before production promotion:
 
 1. Resolve/verify the host memory setting and measure save/rewrite headroom.
-2. Merge reviewed source. Extend the **canonical NXCore guarded deploy path** to attach the app to both its existing gateway network and `rydesync-storage`, and consume the protected storage env fragment. Current deploy tooling only accepts one initial Docker network; do not improvise a public Redis port or bypass mainline/secret/rollback guards.
+2. Review/promote this app source and companion [NXCore PR #27](https://github.com/aerovista-us/nxcore/pull/27). The companion implements and rehearses dual-network/env-fragment support in the **canonical guarded deploy path**, with production target/host/source gates and exact-container rollback. It remains a draft tool rather than the installed production script; do not improvise a public Redis port or bypass these guards.
 3. Preserve the exact old app container/image and existing room-token signing secret. The first cutover cannot migrate active rooms from the old process memory; schedule an interruption window for those Rydes.
 4. Accept the new app's health/storage mode, hosting/guest/role gates, restart recovery, outage behavior and relevant public/authenticated-device checks. The earlier public health request returned 403 from the agent's network; public-edge acceptance was not renewed here.
 5. On failed acceptance, stop/remove the candidate and restore the exact preserved old app container. Keep the Redis volume for investigation. Rolling back to the old memory-only app does not preserve Redis-backed active Rydes.

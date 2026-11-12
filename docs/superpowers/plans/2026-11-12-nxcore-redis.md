@@ -17,4 +17,4 @@ Private Redis only; $0 new external spend; no coordinates/voice/credentials in p
 - [x] Implement lease-guarded `apps/api/lib/redis-room-repository.js`; validate config, inject async startup store, await REST/WS durable mutations and fail closed on storage outage. Run original plus new tests.
 - [x] Pin official client in package/lock and install dependencies in Dockerfile. Add dedicated private Redis Compose/config/decision manifest and repeatable health/backup tooling.
 - [x] Run isolated Redis HTTP/WS restart, lease exclusion/loss, TTL and outage tests. Restore a snapshot into a fresh isolated volume and verify token-bound room state; inspect AOF contents for prohibited ephemeral fields.
-- [ ] Inspect complete diff, secret boundaries, rollback and operational status. Commit/push branch and create reviewable PR with precise evidence. Keep current app deployment separate from source review and persistence pilot.
+- [x] Inspect complete diff, secret boundaries, rollback and operational status. Commit/push branch and create reviewable PR with precise evidence. Keep current app deployment separate from source review and persistence pilot.

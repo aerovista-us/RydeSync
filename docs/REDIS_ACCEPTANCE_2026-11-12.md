@@ -36,3 +36,8 @@ No live RydeSync container, routing, existing app env, identity service, host ke
 - Private synthetic recovery fixture remains in the evidence directory, excluded from source control and output.
 
 See `REDIS_OPERATIONS.md` for repeatable commands and rollback semantics.
+
+
+## Follow-up: guarded rollout verified
+
+Companion [NXCore PR #27](https://github.com/aerovista-us/nxcore/pull/27) now implements the private-network/env-fragment deployment wiring on operational master. Its 28 new Redis rollout guard tests and 12 existing source/secret checks pass. An actual guarded deployment of this candidate to loopback staging passed; a full container restart recovered the synthetic room/playback and retained guest restrictions. A deliberately memory-only candidate was rejected, and the exact previous container/image/ports/networks and room state were recovered automatically. Production prerequisites now include review/promotion/installation of that tooling rather than an unwritten network implementation. Host memory configuration and production/capacity/field acceptance remain open. Production is still unchanged.
