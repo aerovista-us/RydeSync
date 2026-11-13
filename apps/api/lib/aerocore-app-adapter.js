@@ -1,15 +1,14 @@
 import crypto from 'node:crypto';
 
 /**
- * RydeSync runtime bridge for AeroCore App Adapter v0.1.
+ * RydeSync zero-build runtime bridge for AeroVista App Adapter v0.4.
  *
  * Canonical TypeScript source currently incubates in ACOS:
  *   packages/aerocore-app-adapter
- *   branch: feat/aerocore-app-adapter-v0
  *
  * This runtime bridge keeps RydeSync on its current zero-build Node runtime
  * while consuming the same locked wire contract. Remove this bridge once
- * @aerovista/app-adapter is published/extracted as an installable package.
+ * @aerovista-us/app-adapter has an approved reproducible package-delivery lane.
  */
 
 export class AeroCoreAdapterError extends Error {
@@ -132,6 +131,9 @@ export function createAeroCoreServerAdapter({
       }
     }),
     identity: Object.freeze({
+      describe(sessionToken) {
+        return call('/v1/identity/describe', { body: { sessionToken } });
+      },
       can({ identityId, capability, resourceType = null, resourceId = null }) {
         return call('/v1/authorization/check', {
           body: { identityId, capability, resourceType, resourceId }

@@ -11,6 +11,7 @@ import { RealtimeHub } from './lib/realtime.js';
 import { echoverseAudioPath, echoverseFilePath, fetchCatalog, proxyEchoVerseBinary } from './lib/echoverse.js';
 import { clearMediaSessionCookie, issueMediaSession, issueRoomMediaSession, mediaSessionCookie, mediaSessionFromRequest } from './lib/media-session.js';
 import { beginBrowserLogin, browserLoginConfigured, browserLogout, completeBrowserLogin } from './lib/browser-auth.js';
+import { clearAuthStateCookies } from './lib/browser-session.js';
 import { verifyRoomToken } from './lib/room-token.js';
 import { issueTurnIceServers, turnIsConfigured } from './lib/turn-credentials.js';
 
@@ -74,7 +75,8 @@ export function createApp(config = loadConfig(), { rooms = null } = {}) {
         version: '3.0.0-alpha.7',
         identity: {
           mode: config.identity.mode,
-          configured: Boolean(config.identity.baseUrl && config.identity.verifyPath),
+          configured: config.identity.mode !== 'off' && Boolean(browserLoginConfigured(config) || (config.identity.baseUrl && config.identity.verifyPath)),
+          provider: browserLoginConfigured(config) ? 'identity-gateway' : null,
           loginConfigured: browserLoginConfigured(config),
           loginPath: browserLoginConfigured(config) ? '/auth/login' : null,
           logoutPath: '/auth/logout'
@@ -137,7 +139,10 @@ export function createApp(config = loadConfig(), { rooms = null } = {}) {
       return completeBrowserLogin(req, res, url, config);
     }
 
-    if (req.method === 'GET' && pathname === '/auth/logout') {
+    if (req.method === 'POST' && pathname === '/auth/logout') {
+      if (req.headers.origin !== new URL(config.publicBaseUrl).origin) {
+        throw new HttpError(403, 'invalid_origin', 'Sign out must start from this RydeSync app');
+      }
       return browserLogout(req, res, config);
     }
 
@@ -307,12 +312,23 @@ export function createApp(config = loadConfig(), { rooms = null } = {}) {
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'same-origin');
     res.setHeader('permissions-policy', 'geolocation=(self), microphone=(self), camera=()');
+    let requestUrl;
     try {
+      requestUrl = new URL(req.url, config.publicBaseUrl);
+      if (requestUrl.pathname.startsWith('/auth/')) res.setHeader('referrer-policy', 'no-referrer');
       await route(req, res);
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
       const code = error instanceof HttpError ? error.code : 'internal_error';
       const message = error instanceof HttpError ? error.message : 'Unexpected server error';
+      if (requestUrl?.pathname === '/auth/callback') {
+        res.writeHead(302, {
+          location: `/?login_error=${encodeURIComponent(code)}`,
+          'cache-control': 'no-store',
+          'set-cookie': clearAuthStateCookies(requestUrl.searchParams.get('state'), config)
+        });
+        return res.end();
+      }
       if (!(error instanceof HttpError)) console.error(error);
       json(res, status, { error: { code, message, details: error.details ?? null } });
     }

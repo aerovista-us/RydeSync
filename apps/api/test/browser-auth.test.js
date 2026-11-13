@@ -86,12 +86,12 @@ test('one-time handoff uses the adapter HMAC contract, resolves identity, and cr
         sessionToken: 'avcc-session-token-123456',
         csrfToken: 'csrf',
         cookieName: 'acos_session',
-        expiresAt: '2026-08-28T18:00:00Z'
+        expiresAt: new Date(Date.now() + 3600000).toISOString()
       }));
     }
-    if (req.url === '/v1/session/resolve') {
+    if (req.url === '/v1/identity/describe') {
       assert.deepEqual(parsed, { sessionToken: 'avcc-session-token-123456' });
-      return res.end(JSON.stringify({ ok: true, authenticated: true, identityId: 'identity_handoff' }));
+      return res.end(JSON.stringify({ ok: true, authenticated: true, identity: { identityId: 'identity_handoff', name: 'Gateway Rider', status: 'active', service: 'rydesync' } }));
     }
     res.statusCode = 404;
     res.end('{}');
@@ -106,11 +106,12 @@ test('one-time handoff uses the adapter HMAC contract, resolves identity, and cr
     await completeBrowserLogin(req, res, new URL('http://127.0.0.1:9000/auth/callback?code=one-time-code&state=state-123'), cfg);
     assert.equal(captured.status, 302);
     assert.equal(captured.headers.location, '/?signed_in=1');
-    assert.deepEqual(calls.map((call) => call.path), ['/v1/handoff/exchange', '/v1/session/resolve']);
+    assert.deepEqual(calls.map((call) => call.path), ['/v1/handoff/exchange', '/v1/identity/describe']);
     const cookies = captured.headers['set-cookie'];
     assert.ok(Array.isArray(cookies));
     assert.match(cookies[0], /^__session=/);
     assert.match(cookies[0], /HttpOnly/);
+    assert.equal(browserSessionFromRequest({ headers: { cookie: cookies[0].split(';')[0] } }, cfg).principal.displayName, 'Gateway Rider');
   } finally {
     await new Promise((resolve) => gateway.close(resolve));
   }

@@ -49,8 +49,13 @@ function open(token, config) {
   }
 }
 
-export function issueBrowserSession({ principal, upstreamToken = null }, config, now = Date.now()) {
-  const ttlSeconds = config.identity.browserSessionTtlSeconds ?? 900;
+export function issueBrowserSession({ principal, upstreamToken = null, upstreamExpiresAt = null }, config, now = Date.now()) {
+  let ttlSeconds = config.identity.browserSessionTtlSeconds ?? 900;
+  if (upstreamExpiresAt != null) {
+    const remaining = Math.floor((Date.parse(upstreamExpiresAt) - now) / 1000);
+    if (!Number.isFinite(remaining) || remaining < 1) throw new Error('Upstream session expiry is invalid or expired');
+    ttlSeconds = Math.min(ttlSeconds, remaining);
+  }
   const payload = {
     v: VERSION,
     aud: 'rydesync-browser',

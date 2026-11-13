@@ -57,22 +57,6 @@ export function mapAvIdentityPayload(payload) {
   });
 }
 
-function snapshotPrincipal(session) {
-  const principal = session?.principal;
-  if (!principal?.identityId) return null;
-  return Object.freeze({
-    kind: 'member',
-    authenticated: true,
-    identityId: principal.identityId,
-    displayName: principal.displayName || null,
-    email: principal.email || null,
-    capabilities: Object.freeze(Array.isArray(principal.capabilities) ? [...new Set(principal.capabilities)] : []),
-    capabilitiesFresh: false,
-    authState: 'handoff_session',
-    reason: 'live_capabilities_not_verified'
-  });
-}
-
 export async function verifyWithAeroVista(token, config) {
   if (typeof config.identity.verifyToken === 'function') {
     const result = await config.identity.verifyToken(token);
@@ -80,7 +64,7 @@ export async function verifyWithAeroVista(token, config) {
   }
 
   if (!config.identity.baseUrl || !config.identity.verifyPath) {
-    throw new IdentityContractError('AeroVista Identity verification endpoint is not configured');
+    throw new IdentityContractError('Legacy bearer verification is not configured; use AeroVista Account sign-in');
   }
 
   const controller = new AbortController();
@@ -108,16 +92,15 @@ export async function verifyWithAeroVista(token, config) {
   }
 }
 
-async function verifyBrowserAdapterSession(session, config) {
-  if (!session?.upstreamToken) return snapshotPrincipal(session);
+export async function describeGatewaySession(token, config, expectedIdentityId = null) {
   if (!config.identity.identityGatewayOrigin || !config.identity.serviceSecret) {
     throw new IdentityContractError('AeroCore App Adapter service identity is not configured');
   }
 
   const av = createRydeSyncAeroCoreAdapter(config);
-  let resolved;
+  let described;
   try {
-    resolved = await av.auth.resolveSession(session.upstreamToken);
+    described = await av.identity.describe(token);
   } catch (error) {
     if (error instanceof AeroCoreAdapterError && [401, 403].includes(error.status)) {
       throw new HttpError(401, 'identity_rejected', 'AeroVista Identity rejected this session');
@@ -125,25 +108,40 @@ async function verifyBrowserAdapterSession(session, config) {
     throw error;
   }
 
-  if (!resolved?.authenticated || typeof resolved.identityId !== 'string' || resolved.identityId.length < 4) {
+  if (!described?.authenticated) {
     throw new HttpError(401, 'identity_rejected', 'AeroVista Identity session is no longer authenticated');
   }
+  const identity = described.identity;
+  if (typeof identity?.identityId !== 'string' || identity.identityId.length < 4) {
+    throw new IdentityContractError('Gateway descriptor did not include a canonical identityId');
+  }
+  if (identity.status !== 'active'
+      || (identity.service && identity.service !== config.identity.appId)
+      || (expectedIdentityId && expectedIdentityId !== identity.identityId)) {
+    throw new HttpError(401, 'identity_rejected', 'AeroVista Identity session does not match this active app identity');
+  }
+  return identity;
+}
+
+async function verifyGatewaySession(token, config, expectedIdentityId = null) {
+  const identity = await describeGatewaySession(token, config, expectedIdentityId);
+  const av = createRydeSyncAeroCoreAdapter(config);
 
   const capabilities = [];
   for (const capability of config.identity.capabilitySnapshot ?? []) {
-    const decision = await av.identity.can({ identityId: resolved.identityId, capability });
+    const decision = await av.identity.can({ identityId: identity.identityId, capability });
     if (decision?.allowed === true) capabilities.push(capability);
   }
 
   return Object.freeze({
     kind: 'member',
     authenticated: true,
-    identityId: resolved.identityId,
-    displayName: session.principal?.displayName || null,
-    email: session.principal?.email || null,
+    identityId: identity.identityId,
+    displayName: typeof identity.name === 'string' ? identity.name : null,
+    email: typeof identity.email === 'string' ? identity.email : null,
     capabilities: Object.freeze(capabilities),
     capabilitiesFresh: true,
-    authState: 'adapter_session',
+    authState: 'gateway_session',
     reason: null
   });
 }
@@ -170,9 +168,15 @@ export async function resolveIdentity(req, config) {
   if (!browserSession) return guest();
 
   try {
-    return await verifyBrowserAdapterSession(browserSession, config);
+    if (!browserSession.upstreamToken) {
+      throw new HttpError(401, 'identity_rejected', 'Sign in again to verify this legacy browser session');
+    }
+    return await verifyGatewaySession(browserSession.upstreamToken, config, browserSession.principal.identityId);
   } catch (error) {
-    if (error instanceof HttpError && error.status === 401) throw error;
+    if (error instanceof HttpError && error.status === 401) {
+      if (config.identity.mode === 'required') throw error;
+      return guest('expired', 'identity_rejected');
+    }
     if (config.identity.mode === 'required') {
       throw new HttpError(503, 'identity_unavailable', 'AeroVista Identity is unavailable', {
         cause: error?.name || 'IdentityError'
