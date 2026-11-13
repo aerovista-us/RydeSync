@@ -36,8 +36,8 @@ test('browser handoff session is resolved live and capabilities are refreshed th
     const parsed = await body(req);
     calls.push({ path: req.url, body: parsed });
     res.writeHead(200, { 'content-type': 'application/json' });
-    if (req.url === '/v1/session/resolve') {
-      return res.end(JSON.stringify({ ok: true, authenticated: true, identityId: 'avi_member_123' }));
+    if (req.url === '/v1/identity/describe') {
+      return res.end(JSON.stringify({ ok: true, authenticated: true, identity: { identityId: 'avi_member_123', status: 'active', name: 'Live Member', service: 'rydesync' } }));
     }
     if (req.url === '/v1/authorization/check') {
       assert.deepEqual(parsed, {
@@ -65,7 +65,7 @@ test('browser handoff session is resolved live and capabilities are refreshed th
     assert.equal(principal.identityId, 'avi_member_123');
     assert.equal(principal.capabilitiesFresh, true);
     assert.deepEqual(principal.capabilities, ['echoverse.library.listen']);
-    assert.deepEqual(calls.map((call) => call.path), ['/v1/session/resolve', '/v1/authorization/check']);
+    assert.deepEqual(calls.map((call) => call.path), ['/v1/identity/describe', '/v1/authorization/check']);
   } finally {
     await new Promise((resolve) => gateway.close(resolve));
   }

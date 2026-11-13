@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { HttpError } from './http.js';
-import { mapAvIdentityPayload } from './identity.js';
+import { describeGatewaySession, mapAvIdentityPayload } from './identity.js';
+import { clearMediaSessionCookie } from './media-session.js';
 import {
   authStateCookie,
   authStateFromRequest,
@@ -43,7 +44,8 @@ function callbackUrl(config, next = '/') {
 
 export function browserLoginConfigured(config) {
   return Boolean(
-    config.identity.loginUrl
+    config.identity.mode !== 'off'
+    && config.identity.loginUrl
     && config.identity.identityGatewayOrigin
     && config.identity.serviceSecret
     && config.identity.appId
@@ -92,24 +94,25 @@ export async function completeBrowserLogin(req, res, url, config) {
 
   const next = safeNext(url.searchParams.get('next') || '/', config);
   let exchanged;
-  let resolved;
+  let identity;
+  let session;
+  const av = createRydeSyncAeroCoreAdapter(config);
   try {
-    const av = createRydeSyncAeroCoreAdapter(config);
     exchanged = await av.auth.exchangeHandoff(code);
     if (typeof exchanged?.sessionToken !== 'string' || exchanged.sessionToken.length < 12) {
       throw new Error('AeroCore handoff response did not include sessionToken');
     }
-    resolved = await av.auth.resolveSession(exchanged.sessionToken);
+    identity = await describeGatewaySession(exchanged.sessionToken, config);
+    const principal = mapAvIdentityPayload({ identity_id: identity.identityId, name: identity.name });
+    session = issueBrowserSession({ principal, upstreamToken: exchanged.sessionToken, upstreamExpiresAt: exchanged.expiresAt }, config);
   } catch (error) {
+    if (exchanged?.sessionToken) {
+      try { await av.auth.revokeSession(exchanged.sessionToken); } catch { /* Best effort; no local session was issued. */ }
+    }
+    if (error instanceof HttpError) throw error;
     throw mapAdapterFailure(error);
   }
 
-  if (!resolved?.authenticated || typeof resolved.identityId !== 'string' || resolved.identityId.length < 4) {
-    throw new HttpError(401, 'handoff_rejected', 'AeroVista did not resolve an authenticated identity for this handoff');
-  }
-
-  const principal = mapAvIdentityPayload({ identity_id: resolved.identityId });
-  const session = issueBrowserSession({ principal, upstreamToken: exchanged.sessionToken }, config);
   const destination = new URL(next, config.publicBaseUrl);
   destination.searchParams.set('signed_in', '1');
   return redirect(res, `${destination.pathname}${destination.search}`, {
@@ -128,5 +131,5 @@ export async function browserLogout(req, res, config) {
       // shared Identity service is temporarily unreachable.
     }
   }
-  return redirect(res, '/', { 'set-cookie': [clearBrowserSessionCookie(config), ...clearAuthStateCookiesFromRequest(req, config)] });
+  return redirect(res, '/', { 'set-cookie': [clearBrowserSessionCookie(config), clearMediaSessionCookie(config), ...clearAuthStateCookiesFromRequest(req, config)] });
 }

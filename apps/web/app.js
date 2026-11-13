@@ -51,7 +51,12 @@ async function refreshIdentity() {
   $('#locationMode').textContent = bootstrap.features.liveLocation ? 'OPT-IN' : 'OFF';
   ensureCrewMap();
   renderVoiceBootstrap();
-  const session = await api('/v1/session');
+  let session;
+  try { session = await api('/v1/session'); }
+  catch (error) {
+    if (error.status !== 401) throw error;
+    session = { principal: { authenticated: false, authState: 'expired', capabilities: [] } };
+  }
   currentPrincipal = session.principal;
   const pill = $('#identityPill');
   pill.classList.remove('connected', 'warn');
@@ -65,7 +70,11 @@ async function refreshIdentity() {
     signInButton.classList.toggle('disabled-link', !bootstrap.identity.loginConfigured);
   }
   const hint = $('#signInHint');
-  if (hint && !bootstrap.identity.loginConfigured) hint.textContent = 'AeroVista sign-in needs the Access Convergence exchange URL configured on this deployment. Joining remains available.';
+  if (hint) hint.textContent = !bootstrap.identity.loginConfigured
+    ? 'AeroVista sign-in is temporarily unavailable. Joining remains available.'
+    : session.principal.authState === 'expired'
+      ? 'Your sign-in expired or was revoked. Sign in again to host or use your library; Guest Join stays available.'
+      : 'Joining a Ryde never requires an account.';
   if (signedIn) {
     pill.textContent = session.principal.displayName || 'AeroVista Member';
     pill.classList.add('connected');
@@ -856,8 +865,23 @@ setInterval(() => { if (realtime?.playback?.trackId) renderPlayback(); }, 500);
 setInterval(() => { if (audioEngine?.armed && realtime?.playback?.trackId) applyPlaybackToAudio(realtime.playback).catch(console.error); }, 2000);
 setInterval(() => { renewMediaSessionIfNeeded().catch(console.error); }, 60000);
 
-refreshIdentity().catch((error) => {
-  $('#identityPill').textContent = 'Identity status unavailable';
-  $('#identityPill').classList.add('warn');
-  console.error(error);
-});
+let identityRefreshPending = false;
+async function refreshIdentitySafely() {
+  if (identityRefreshPending) return;
+  identityRefreshPending = true;
+  try { await refreshIdentity(); }
+  catch {
+    currentPrincipal = null;
+    $('#createCard').classList.add('hidden');
+    $('#memberCard').classList.add('hidden');
+    $('#signInCard').classList.remove('hidden');
+    $('#echoverseLoad').disabled = true;
+    $('#identityPill').textContent = 'Identity unavailable · guest mode';
+    $('#identityPill').classList.remove('connected');
+    $('#identityPill').classList.add('warn');
+  } finally { identityRefreshPending = false; }
+}
+setInterval(() => { if (!document.hidden) void refreshIdentitySafely(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshIdentitySafely(); });
+window.addEventListener('focus', () => { void refreshIdentitySafely(); });
+void refreshIdentitySafely();

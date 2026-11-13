@@ -33,12 +33,14 @@ Current server-side broker calls:
 
 ```text
 POST /v1/handoff/exchange
-POST /v1/session/resolve
+POST /v1/identity/describe
 POST /v1/session/revoke
 POST /v1/authorization/check
 ```
 
-Browser handoff is one-time code + state only. RydeSync exchanges the code server-side using HMAC service authentication and creates an encrypted HttpOnly `__session`. No Firebase/AVCC/service token belongs in the redirect URL.
+Browser handoff is one-time code + state only. RydeSync exchanges the code server-side using HMAC service authentication and creates an encrypted HttpOnly `__session`. No Firebase/AVCC/service token belongs in the redirect URL. Each authenticated browser request verifies the active canonical identity with `identity.describe()` and reads capabilities with `identity.can()`; cached names or role labels never grant access.
+
+Sign-out uses a same-origin `POST /auth/logout`, revokes the app session and clears both account and library-media cookies. Local session expiry is bounded by upstream expiry. Invalid/revoked optional browser sessions return guest state so public joining remains usable; hosting and library endpoints still reject them. The UI rechecks identity every minute while visible and when returning to the app. See `docs/SIGN_IN_AUDIT_2026-11-13.md` for findings, deployment state and limits.
 
 Canonical production Identity Gateway source is **not** the standalone `identity-gateway` repo. It is:
 
@@ -60,15 +62,15 @@ Current RydeSync bridge:
 apps/api/lib/aerocore-app-adapter.js
 ```
 
-Shared TypeScript package incubation:
+Canonical shared TypeScript package (`@aerovista-us/app-adapter` v0.4):
 
 ```text
 aerovista-us/ACOS
-branch: feat/aerocore-app-adapter-v0
+branch: main
 path: packages/aerocore-app-adapter
 ```
 
-The adapter owns Account login URL construction, handoff exchange, session resolve/revoke, live capability checks, signed service calls, timeout/error normalization, and the HMAC contract. See `docs/AEROCORE_APP_ADAPTER_SCHEMATIC.md`.
+The adapter owns Account login URL construction, handoff exchange, live identity describe/session revoke, live capability checks, signed service calls, timeout/error normalization, and the HMAC contract. See `docs/AEROCORE_APP_ADAPTER_SCHEMATIC.md`.
 
 ## Push-to-talk
 
@@ -134,7 +136,7 @@ That is an authorization result when an authenticated identity lacks the explici
 npm test
 ```
 
-Current Alpha.7 repository suite: **69/69 passing**, plus production Docker Compose validation in the PR workflow. The named synthetic identity matrix covers staff/member allow/deny, guests, revocation, stale authorization, expired/unknown credentials, room boundaries, and TURN/STUN readiness.
+Sign-in upgrade suite: **162/162 passing with isolated real Redis**, plus production Docker Compose validation in the PR workflow. The named synthetic identity matrix covers staff/member allow/deny, guests, revocation, stale authorization, expired/unknown credentials, room boundaries, and TURN/STUN readiness.
 
 ## Run
 
@@ -142,7 +144,6 @@ Node 22+:
 
 ```bash
 cp .env.example .env
-npm ci
 npm test
 npm start
 ```
