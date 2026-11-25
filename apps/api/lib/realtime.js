@@ -4,6 +4,7 @@ import { acceptWebSocket } from './websocket.js';
 import { normalizeLocation } from './location.js';
 import { applyPlaybackCommand, createPlaybackState, publicPlayback, PlaybackError } from './playback.js';
 import { canControlPlayback, canUseVoice } from './permissions.js';
+import { createVoiceFloor } from './voice-floor-lease.js';
 
 const CLOSE = Object.freeze({
   BAD_REQUEST: 4000,
@@ -45,15 +46,19 @@ export class RealtimeHub {
     this.config = config;
     this.now = now;
     this.roomStates = new Map();
+    this.leaseRoomIds = new Set(config.voice?.leaseRoomIds || []);
 
     server.on('upgrade', (req, socket, head) => this.#upgrade(req, socket, head));
     this.heartbeat = setInterval(() => this.#heartbeat(), config.realtime.heartbeatMs);
     this.heartbeat.unref?.();
     this.playbackTimer = setInterval(() => this.#playbackSync(), config.playback?.syncIntervalMs ?? 10_000);
     this.playbackTimer.unref?.();
+    this.voiceLeaseTimer = this.leaseRoomIds.size ? setInterval(() => this.#sweepVoiceLeases(), 250) : null;
+    this.voiceLeaseTimer?.unref?.();
     server.on('close', () => {
       clearInterval(this.heartbeat);
       clearInterval(this.playbackTimer);
+      clearInterval(this.voiceLeaseTimer);
     });
   }
 
@@ -75,7 +80,8 @@ export class RealtimeHub {
         playback: this.rooms.resolve(roomId).playback || createPlaybackState(this.now()),
         lastPlaybackSyncAt: 0,
         voicePeers: new Set(),
-        voiceFloorMemberId: null
+        voiceFloorMemberId: null,
+        voiceLease: this.leaseRoomIds.has(roomId) ? createVoiceFloor({now:this.now}) : null
       };
       this.roomStates.set(roomId, state);
     }
@@ -115,6 +121,7 @@ export class RealtimeHub {
       voice: {
         enabled: Boolean(this.config.voice?.enabled),
         floorMemberId: state.voiceFloorMemberId,
+        ...(state.voiceLease ? { floorProtocol: 'lease-v1', floorExpiresAt: state.voiceLease.current()?.expiresAt ?? null } : {}),
         peers: [...state.voicePeers].map((memberId) => {
           const member = room.members.get(memberId);
           return member ? publicMember(member, state.connections.has(memberId)) : null;
@@ -193,6 +200,19 @@ export class RealtimeHub {
       return;
     }
 
+    // Opt-in only; public legacy rooms keep their existing protocol.
+    if (this.leaseRoomIds.has(room.id)) {
+      const live = this.rooms.resolve(room.id);
+      const current = this.#state(room.id).connections.get(connection.memberId);
+      const member = live.members.get(connection.memberId);
+      if (current !== connection || !member || member.role !== connection.role ||
+          member.identityId !== connection.identityId || this.now() >= connection.tokenExpiresAt) {
+        connection.ws.close(CLOSE.AUTH_FAILED, 'Room session no longer valid');
+        return;
+      }
+      room = live;
+    }
+
     if (message.type === 'presence.ping') {
       connection.alive = true;
       this.#send(connection, {
@@ -226,6 +246,9 @@ export class RealtimeHub {
     }
 
     if (message.type === 'voice.join') {
+      if (this.leaseRoomIds.has(room.id) && message.floorProtocol !== 'lease-v1') {
+        return this.#voiceError(connection, room.id, 'voice_protocol_required', 'This pilot room requires lease-v1');
+      }
       this.#voiceJoin(connection, room);
       return;
     }
@@ -241,12 +264,17 @@ export class RealtimeHub {
     }
 
     if (message.type === 'voice.talk.start') {
-      this.#voiceTalkStart(connection, room);
+      this.#voiceTalkStart(connection, room, message);
       return;
     }
 
     if (message.type === 'voice.talk.stop') {
-      this.#voiceTalkStop(connection, room);
+      this.#voiceTalkStop(connection, room, message);
+      return;
+    }
+
+    if (message.type === 'voice.talk.renew' && this.leaseRoomIds.has(room.id)) {
+      this.#leaseCommand(connection, room, message, 'renew');
       return;
     }
 
@@ -318,6 +346,8 @@ export class RealtimeHub {
     const state = this.roomStates.get(roomId);
     if (!state || !state.voicePeers.delete(memberId)) return false;
     if (state.voiceFloorMemberId === memberId) {
+      const lease = state.voiceLease?.current();
+      if (lease?.memberId === memberId) state.voiceLease.revoke(lease);
       state.voiceFloorMemberId = null;
       this.#broadcast(roomId, this.#event(roomId, 'voice.floor', { memberId: null, reason }));
     }
@@ -361,12 +391,13 @@ export class RealtimeHub {
     });
   }
 
-  #voiceTalkStart(connection, room) {
+  #voiceTalkStart(connection, room, message) {
     const state = this.#state(room.id);
     const member = room.members.get(connection.memberId);
     if (!state.voicePeers.has(connection.memberId) || !member || !canUseVoice(room.mode, member.role)) {
       return this.#voiceError(connection, room.id, 'voice_forbidden', 'Push-to-talk is not available for this room membership');
     }
+    if (state.voiceLease) return this.#leaseCommand(connection, room, message, 'request');
     if (state.voiceFloorMemberId && state.voiceFloorMemberId !== connection.memberId) {
       this.#send(connection, {
         type: 'voice.floor.denied',
@@ -385,11 +416,72 @@ export class RealtimeHub {
     }
   }
 
-  #voiceTalkStop(connection, room) {
+  #voiceTalkStop(connection, room, message) {
     const state = this.#state(room.id);
+    if (state.voiceLease) return this.#leaseCommand(connection, room, message, 'release');
     if (state.voiceFloorMemberId !== connection.memberId) return;
     state.voiceFloorMemberId = null;
     this.#broadcast(room.id, this.#event(room.id, 'voice.floor', { memberId: null, reason: 'released' }));
+  }
+
+  #leaseActor(connection, room, state) {
+    const member = room.members.get(connection.memberId);
+    return {
+      memberId: connection.memberId, connectionId: connection.id,
+      expiresAt: Math.min(connection.tokenExpiresAt || 0, room.expiresAt),
+      authorized: Boolean(this.config.voice?.enabled && member &&
+        state.connections.get(connection.memberId) === connection &&
+        member.role === connection.role && member.identityId === connection.identityId &&
+        state.voicePeers.has(connection.memberId) && canUseVoice(room.mode, member.role))
+    };
+  }
+
+  #clearLeaseFloor(roomId, state, reason) {
+    state.voiceFloorMemberId = null;
+    this.#broadcast(roomId, this.#event(roomId, 'voice.floor', {memberId:null,reason,floorProtocol:'lease-v1'}));
+  }
+
+  #leaseCommand(connection, room, message, command) {
+    const state = this.#state(room.id), lease = state.voiceLease;
+    if (!lease) return;
+    const actor = this.#leaseActor(connection, room, state);
+    const result = command === 'request' ? lease.request(actor,message.requestId) :
+      command === 'renew' ? lease.renew(actor,message.floorId,message.requestId) :
+      lease.release(actor,message.floorId,message.requestId);
+    if (result.expired) this.#clearLeaseFloor(room.id,state,'lease_expired');
+    if (!result.ok) {
+      this.#send(connection,{type:'voice.floor.denied',floorProtocol:'lease-v1',seq:state.seq,serverTs:new Date(this.now()).toISOString(),
+        requestId:typeof message.requestId==='string'?message.requestId.slice(0,128):null,
+        reason:result.reason||'stale_floor',memberId:result.memberId||state.voiceFloorMemberId});
+      return;
+    }
+    if (command==='release') return this.#clearLeaseFloor(room.id,state,'released');
+    const floor=result.floor;
+    state.voiceFloorMemberId=floor.memberId;
+    if (!result.duplicate) this.#broadcast(room.id,this.#event(room.id,'voice.floor',{
+      memberId:floor.memberId,member:publicMember(room.members.get(floor.memberId),true),
+      floorProtocol:'lease-v1',expiresAt:floor.expiresAt
+    }));
+    this.#send(connection,{type:command==='renew'?'voice.floor.renewed':'voice.floor.granted',
+      floorProtocol:'lease-v1',seq:state.seq,serverTs:new Date(this.now()).toISOString(),
+      roomId:room.id,...floor});
+  }
+
+  #sweepVoiceLeases() {
+    try {this.rooms.assertReady?.()} catch {this.shutdown();return}
+    for(const [roomId,state] of this.roomStates) {
+      const lease=state.voiceLease;
+      if(!lease)continue;
+      if(lease.expire()){this.#clearLeaseFloor(roomId,state,'lease_expired');continue}
+      const floor=lease.current();
+      if(!floor)continue;
+      let room=null;try{room=this.rooms.resolve(roomId)}catch{/* ended */}
+      const connection=state.connections.get(floor.memberId);
+      const actor=room&&connection?this.#leaseActor(connection,room,state):null;
+      if(!actor?.authorized||actor.connectionId!==floor.connectionId||actor.expiresAt<=this.now()){
+        lease.revoke(floor);this.#clearLeaseFloor(roomId,state,'authorization_changed');
+      }
+    }
   }
 
   async #roomLock(connection, room, message) {
@@ -536,9 +628,11 @@ export class RealtimeHub {
     connection.memberId = member.id;
     connection.role = member.role;
     connection.identityId = member.identityId;
+    connection.tokenExpiresAt = claims.exp * 1000;
     connection.alive = true;
 
     if (previous && previous !== connection) {
+      if (state.voiceLease) this.#voiceLeave(room.id, member.id, 'replaced');
       previous.replacing = true;
       previous.ws.close(CLOSE.REPLACED, 'Reconnected from another client');
     }
@@ -602,6 +696,7 @@ export class RealtimeHub {
   shutdown() {
     clearInterval(this.heartbeat);
     clearInterval(this.playbackTimer);
+    clearInterval(this.voiceLeaseTimer);
     for (const state of this.roomStates.values()) {
       for (const connection of state.connections.values()) connection.ws.close(1013, 'Server reconnect required');
       state.locations.clear();
