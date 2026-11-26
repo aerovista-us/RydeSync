@@ -32,8 +32,13 @@ export function selectedIcePathFromStats(report) {
 }
 
 export class VoiceClient {
-  constructor({ iceServers = [], send, onState = () => {}, onFloor = () => {} } = {}) {
+  constructor({ iceServers = [], send, onState = () => {}, onFloor = () => {}, managedFloor = false, getIceServers = null } = {}) {
     this.iceServers = Array.isArray(iceServers) ? iceServers : [];
+    this.managedFloor = managedFloor;
+    this.getIceServers = getIceServers;
+    this.generation = 0;
+    this.enabling = false;
+    this.pendingPeers = new Map();
     this.send = send;
     this.onState = onState;
     this.onFloor = onFloor;
@@ -89,6 +94,16 @@ export class VoiceClient {
   async #refreshIceServers({ force = false } = {}) {
     const now = Date.now();
     if (!force && this.iceRefreshAfter > now) return true;
+    if (this.managedFloor) {
+      if (typeof this.getIceServers !== 'function') return false;
+      const generation = this.generation;
+      const value = await this.getIceServers();
+      if (generation !== this.generation) return false;
+      if (!Array.isArray(value?.iceServers)) throw new Error('Authorized ICE configuration unavailable');
+      this.iceServers = value.iceServers;
+      this.iceRefreshAfter = now + 30000;
+      return true;
+    }
     const roomToken = this.#roomToken();
     if (!roomToken || typeof globalThis.fetch !== 'function') return false;
 
@@ -123,23 +138,32 @@ export class VoiceClient {
       this.rejoin();
       return;
     }
+    if (this.enabling) throw new Error('Microphone request already pending');
+    const generation = ++this.generation;
+    this.enabling = true;
+    try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone capture is not supported by this browser');
-    await this.#refreshIceServers({ force: true });
+    if (!await this.#refreshIceServers({ force: true }) && this.managedFloor) throw new Error("Authorized ICE configuration unavailable");
     this.#emit('requesting');
-    this.stream = await navigator.mediaDevices.getUserMedia({
+    if (generation !== this.generation) return;
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: false
     });
-    for (const track of this.stream.getAudioTracks()) track.enabled = false;
+    for (const track of stream.getAudioTracks()) track.enabled = false;
+    if (generation !== this.generation) { for (const track of stream.getTracks()) track.stop(); return; }
+    this.stream = stream;
+    if(this.managedFloor)for(const track of stream.getAudioTracks())track.addEventListener("ended",()=>{if(generation===this.generation)this.#emit("error","Microphone lost")},{once:true});
     this.selfMemberId = selfMemberId;
     this.enabled = true;
     this.joined = false;
-    this.#send({ type: 'voice.join' });
+    if (!this.#send({ type: 'voice.join', ...(this.managedFloor ? {floorProtocol:'lease-v1'} : {}) })) { this.disable({notify:false}); throw new Error('Voice signaling unavailable'); }
     this.#emit('connecting');
+    } finally { if (generation === this.generation) this.enabling = false; }
   }
 
   rejoin() {
-    if (!this.enabled) return;
+    if (!this.enabled || this.managedFloor) return;
     this.joined = false;
     this.#muteLocal();
     this.#refreshIceServers().finally(() => {
@@ -150,6 +174,7 @@ export class VoiceClient {
   }
 
   realtimeDisconnected() {
+    if(this.managedFloor) { this.disable({notify:false}); return; }
     this.joined = false;
     this.floorMemberId = null;
     this.pressActive = false;
@@ -159,6 +184,9 @@ export class VoiceClient {
   }
 
   disable({ notify = true } = {}) {
+    ++this.generation;
+    this.enabling = false;
+    this.pendingPeers.clear();
     this.pressActive = false;
     this.#muteLocal();
     if (notify && this.joined) this.#send({ type: 'voice.leave' });
@@ -168,13 +196,14 @@ export class VoiceClient {
     this.enabled = false;
     this.joined = false;
     this.floorMemberId = null;
+    this.receiveMemberId = null;
     this.connectionPaths.clear();
     this.#emit('off');
     this.onFloor({ memberId: null, active: false });
   }
 
   pressStart() {
-    if (!this.enabled || !this.joined || this.pressActive) return false;
+    if (this.managedFloor || !this.enabled || !this.joined || this.pressActive) return false;
     this.pressActive = true;
     this.#send({ type: 'voice.talk.start' });
     this.#emit('requesting_floor');
@@ -182,7 +211,7 @@ export class VoiceClient {
   }
 
   pressStop() {
-    if (!this.pressActive && this.floorMemberId !== this.selfMemberId) return false;
+    if (this.managedFloor || (!this.pressActive && this.floorMemberId !== this.selfMemberId)) return false;
     this.pressActive = false;
     this.#muteLocal();
     if (this.joined) this.#send({ type: 'voice.talk.stop' });
@@ -190,7 +219,21 @@ export class VoiceClient {
     return true;
   }
 
+  // Only the CommLink lease controller may request a managed transmit.
+  setManagedTransmit(active) {
+    if (!this.managedFloor) throw new Error('Not a managed voice client');
+    const tracks=this.stream?.getAudioTracks()||[];
+    const maySend = active === true && this.enabled && this.joined && tracks.some(track=>track.readyState==='live');
+    for (const track of tracks) track.enabled = maySend && track.readyState==='live';
+    return maySend;
+  }
+  setManagedReceiver(memberId) {
+    if (!this.managedFloor) return;
+    this.receiveMemberId = memberId || null;
+    for (const [id,audio] of this.audios) audio.muted = id !== this.receiveMemberId;
+  }
   async handle(message) {
+    if(this.managedFloor && !this.enabled) return false;
     switch (message?.type) {
       case 'voice.joined':
         this.joined = true;
@@ -239,7 +282,7 @@ export class VoiceClient {
   }
 
   #applyFloor() {
-    if (!this.stream) return;
+    if (!this.stream || this.managedFloor) return;
     const maySend = this.joined && this.floorMemberId === this.selfMemberId && this.pressActive;
     for (const track of this.stream.getAudioTracks()) track.enabled = maySend;
   }
@@ -259,18 +302,25 @@ export class VoiceClient {
   async #ensurePeer(remoteId) {
     if (!remoteId || remoteId === this.selfMemberId || !this.stream) return null;
     if (this.peers.has(remoteId)) return this.peers.get(remoteId);
-
+    if (this.pendingPeers.has(remoteId)) return this.pendingPeers.get(remoteId);
+    const generation = this.generation;
+    const pending = this.#createPeer(remoteId,generation);
+    this.pendingPeers.set(remoteId,pending);
+    try { return await pending; } finally { if(this.pendingPeers.get(remoteId)===pending)this.pendingPeers.delete(remoteId); }
+  }
+  async #createPeer(remoteId,generation) {
     await this.#refreshIceServers();
+    if (generation !== this.generation || !this.stream || !this.enabled) return null;
     const pc = new RTCPeerConnection({ iceServers: this.iceServers });
     this.peers.set(remoteId, pc);
     for (const track of this.stream.getTracks()) pc.addTrack(track, this.stream);
 
     pc.onicecandidate = ({ candidate }) => {
-      if (candidate) this.#send({ type: 'voice.signal', toMemberId: remoteId, candidate: candidate.toJSON?.() || candidate });
+      if (generation === this.generation && this.peers.get(remoteId)===pc && candidate) this.#send({ type: 'voice.signal', toMemberId: remoteId, candidate: candidate.toJSON?.() || candidate });
     };
     pc.ontrack = ({ streams }) => {
       const stream = streams?.[0];
-      if (!stream) return;
+      if (!stream || generation !== this.generation || this.peers.get(remoteId)!==pc) return;
       let audio = this.audios.get(remoteId);
       if (!audio) {
         audio = document.createElement('audio');
@@ -281,10 +331,13 @@ export class VoiceClient {
         document.body.appendChild(audio);
         this.audios.set(remoteId, audio);
       }
+      if (generation !== this.generation || this.peers.get(remoteId)!==pc) return;
+      if(this.managedFloor)audio.muted=remoteId!==this.receiveMemberId;
       audio.srcObject = stream;
       audio.play().catch(() => this.#emit('gesture_required', remoteId));
     };
     pc.onconnectionstatechange = () => {
+      if(this.peers.get(remoteId)!==pc)return;
       if (['failed', 'closed'].includes(pc.connectionState)) this.#removePeer(remoteId);
       else if (pc.connectionState === 'connected') {
         this.#emit('ready');
@@ -297,7 +350,9 @@ export class VoiceClient {
 
     if (shouldInitiateOffer(this.selfMemberId, remoteId)) {
       const offer = await pc.createOffer();
+      if(generation!==this.generation || this.peers.get(remoteId)!==pc)return null;
       await pc.setLocalDescription(offer);
+      if(generation!==this.generation || this.peers.get(remoteId)!==pc)return null;
       this.#send({ type: 'voice.signal', toMemberId: remoteId, description: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
     }
     return pc;
@@ -305,13 +360,17 @@ export class VoiceClient {
 
   async #handleSignal(message) {
     const remoteId = message.fromMemberId;
+    const generation=this.generation;
     const pc = await this.#ensurePeer(remoteId);
-    if (!pc) return;
+    if (!pc || generation!==this.generation || this.peers.get(remoteId)!==pc) return;
     if (message.description) {
       await pc.setRemoteDescription(message.description);
+      if(generation!==this.generation || this.peers.get(remoteId)!==pc)return;
       if (message.description.type === 'offer') {
         const answer = await pc.createAnswer();
+        if(generation!==this.generation || this.peers.get(remoteId)!==pc)return;
         await pc.setLocalDescription(answer);
+        if(generation!==this.generation || this.peers.get(remoteId)!==pc)return;
         this.#send({ type: 'voice.signal', toMemberId: remoteId, description: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
       }
     }
